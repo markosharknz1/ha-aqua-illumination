@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aqua Illumination light",
+        "description": "Enter the light's IP address (give it a DHCP reservation so it never moves). For linked lights, use the parent.",
+        "data": { "host": "IP address", "name": "Name (optional)" }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach an Aqua Illumination light at that address.",
+      "not_parent": "That light is a child of a linked pair - use the parent light's address."
+    },
+    "abort": { "already_configured": "That light is already set up." }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "poll_interval": "Poll interval (seconds)",
+          "auto_clock": "Keep the light's clock correct automatically"
+        }
+      }
+    }
+  }
+}

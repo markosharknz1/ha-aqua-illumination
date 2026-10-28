@@ -1,0 +1,12 @@
+{
+  "domain": "aqua_illumination",
+  "name": "Aqua Illumination",
+  "codeowners": ["@markosharknz1"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend"],
+  "documentation": "https://github.com/markosharknz1/ha-aqua-illumination",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/markosharknz1/ha-aqua-illumination/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

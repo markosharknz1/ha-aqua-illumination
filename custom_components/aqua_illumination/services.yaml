@@ -1,0 +1,50 @@
+set_channels:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+    levels:
+      required: true
+      example: '{"blue": 40, "deep_blue": 60}'
+      selector:
+        object:
+set_schedule:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+    ramps:
+      required: true
+      example: '[{"color": "blue", "points": [{"time": 0, "intensity": 0}, {"time": 480, "intensity": 600}, {"time": 1200, "intensity": 0}]}]'
+      selector:
+        object:
+    name:
+      selector:
+        text:
+sync_clock:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+set_lunar:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+    enable:
+      selector:
+        boolean:
+    start:
+      selector:
+        time:
+    end:
+      selector:
+        time:
