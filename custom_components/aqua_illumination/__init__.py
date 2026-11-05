@@ -17,7 +17,7 @@ from .const import (
 )
 from .coordinator import AquaCoordinator
 
-PLATFORMS = ["number", "switch", "sensor", "button", "time"]
+PLATFORMS = ["number", "switch", "sensor", "binary_sensor", "button", "time"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

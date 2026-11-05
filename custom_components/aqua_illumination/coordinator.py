@@ -18,8 +18,10 @@ from .api import (
 from .const import (
     CLOCK_DRIFT_SECONDS,
     DOMAIN,
+    OFFLINE_AFTER_FAILURES,
     SCHEDULE_REFRESH_EVERY,
 )
+from .dropout import DropoutTracker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,12 +43,32 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         self.auto_clock = auto_clock
         self._polls = 0
         self._schedule: dict | None = None
+        self.dropout = DropoutTracker(OFFLINE_AFTER_FAILURES)
 
     @property
     def channels(self) -> list[str]:
         return list((self.data or {}).get("colors", {}))
 
     async def _async_update_data(self) -> dict:
+        try:
+            data = await self._poll()
+        except UpdateFailed as err:
+            if not self.dropout.failure(dt_util.utcnow(), str(err)) and self.data:
+                # A single missed poll is a blip: keep the last good state
+                # rather than flapping every entity to unavailable.
+                _LOGGER.debug("Poll failed (%s); keeping last state", err)
+                return self.data
+            if self.dropout.failures == self.dropout.threshold:
+                _LOGGER.warning("%s went offline: %s", self.name, err)
+            raise
+        if self.dropout.success(dt_util.utcnow()):
+            _LOGGER.info(
+                "%s is back online after %.0f s", self.name,
+                self.dropout.last_outage_seconds or 0,
+            )
+        return data
+
+    async def _poll(self) -> dict:
         try:
             colors = await self.client.colors()
             enabled = await self.client.schedule_enabled()

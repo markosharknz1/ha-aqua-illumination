@@ -9,6 +9,7 @@ CONF_AUTO_CLOCK = "auto_clock"
 DEFAULT_POLL_INTERVAL = 30  # seconds
 DEFAULT_AUTO_CLOCK = True
 SCHEDULE_REFRESH_EVERY = 10  # polls between full schedule re-reads
+OFFLINE_AFTER_FAILURES = 2   # consecutive failed polls before "offline"
 CLOCK_DRIFT_SECONDS = 120    # re-sync the light's clock past this drift
 
 CHANNEL_NAMES = {

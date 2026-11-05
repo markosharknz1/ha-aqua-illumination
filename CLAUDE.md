@@ -17,6 +17,9 @@ api.py (pure client), coordinator.py, config_flow (host + options), number/switc
 card, panel.py auto-registration. Tests: `python -m pytest -p no:socket -p no:homeassistant -q` (9 pass; fake light server).
 All modules import against HA 2025.1.4. Live: reads, channel write, schedule POST, schedule on/off, lunar, set_time; user confirmed light output + overnight blue visible.
 
+## v0.2.0 (local commit, not released)
+Dropout detection: pure `dropout.py` tracker (2 failed polls = offline, one miss keeps last state), `binary_sensor.<light>_connection`, card offline banner/greyed controls/last-chart cache. Tests 12 pass; card render checked in node with stub DOM only (not a browser, not live HA).
+
 ## NOT verified
 Entity layer on a running HA; card in a browser; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.

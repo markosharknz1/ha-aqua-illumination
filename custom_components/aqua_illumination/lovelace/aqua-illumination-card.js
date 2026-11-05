@@ -6,7 +6,7 @@
  *
  * Every other entity is derived from the sensor's name, so one line is enough.
  */
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.2.0";
 
 const COLORS = {
   deep_red: "#b3202a", red: "#e03a3a", far_red: "#8a1c1c", uv: "#8f5bff",
@@ -57,13 +57,21 @@ class AquaIlluminationCard extends HTMLElement {
       this._card.innerHTML = `<div class="pad warn">Entity ${this._config.entity} not found</div>`;
       return;
     }
-    const ramps = sched.attributes.ramps || [];
+    // Dropout detection: the Connection sensor stays available while the
+    // light is down; fall back to "unavailable" states for older installs.
+    const conn = this._e("binary_sensor", "connection");
+    const ca = (conn && conn.attributes) || {};
+    const offline = conn
+      ? conn.state === "off"
+      : [sched.state, (this._e("switch", "schedule") || {}).state].includes("unavailable");
+    // Entities blank out while offline - keep the last good schedule for the chart.
+    if ((sched.attributes.ramps || []).length) this._lastRamps = sched.attributes.ramps;
+    const ramps = sched.attributes.ramps || this._lastRamps || [];
     const temp = this._e("sensor", "temperature");
     const clock = this._e("sensor", "device_clock");
     const schedSw = this._e("switch", "schedule");
     const nightSw = this._e("switch", "night_feeding");
     const chans = this._channels();
-    const offline = [sched.state, schedSw && schedSw.state].includes("unavailable");
 
     // "now" marker: minutes since midnight from the light's own clock.
     let nowMin = null;
@@ -79,19 +87,33 @@ class AquaIlluminationCard extends HTMLElement {
           <div class="title">${title}</div>
           <div class="meta">${temp && temp.state !== "unavailable" ? temp.state + " °C" : ""}</div>
         </div>
-        ${offline ? `<div class="warn">Light is offline</div>` : ""}
-        <div class="toggles">
+        ${offline ? `<div class="warn">⚠ Light offline${ca.offline_since ? " for " + this._ago(ca.offline_since) : ""} — check its power and WiFi${ca.dropouts ? ` · ${ca.dropouts} dropout${ca.dropouts > 1 ? "s" : ""} this session` : ""}</div>` : ""}
+        <div class="toggles ${offline ? "off" : ""}">
           <button class="chip ${schedSw && schedSw.state === "on" ? "on" : ""}" data-act="schedule">Schedule ${schedSw ? schedSw.state : "?"}</button>
           <button class="chip ${nightSw && nightSw.state === "on" ? "on" : ""}" data-act="night">Night feeding</button>
           <button class="chip" data-act="clock">Sync clock</button>
         </div>
-        ${this._chart(ramps, nowMin)}
-        <div class="sliders">
+        <div class="${offline ? "off" : ""}">${this._chart(ramps, nowMin)}</div>
+        <div class="sliders ${offline ? "off" : ""}">
           ${chans.map((c) => this._slider(c)).join("")}
         </div>
-        <div class="foot">Clock: ${clock ? clock.state : "?"} · v${CARD_VERSION}</div>
+        <div class="foot">${offline
+          ? `Last seen ${ca.last_seen ? this._ago(ca.last_seen) + " ago" : "never"}${ca.last_error ? " · " + ca.last_error : ""}`
+          : `Clock: ${clock ? clock.state : "?"}${ca.dropouts ? ` · ${ca.dropouts} dropout${ca.dropouts > 1 ? "s" : ""}${ca.last_outage_seconds ? ` (last ${this._dur(ca.last_outage_seconds)})` : ""}` : ""}`} · v${CARD_VERSION}</div>
       </div>`;
     this._wire();
+  }
+
+  _dur(sec) {
+    sec = Math.round(sec);
+    if (sec < 90) return `${sec}s`;
+    if (sec < 5400) return `${Math.round(sec / 60)} min`;
+    return `${(sec / 3600).toFixed(1)} h`;
+  }
+
+  _ago(iso) {
+    const t = Date.parse(iso);
+    return Number.isNaN(t) ? "?" : this._dur(Math.max(0, (Date.now() - t) / 1000));
   }
 
   _chart(ramps, nowMin) {
@@ -118,13 +140,14 @@ class AquaIlluminationCard extends HTMLElement {
   _slider(c) {
     const st = this._hass.states[c.id];
     if (!st) return "";
-    const v = Number(st.state) || 0;
+    const gone = st.state === "unavailable" || st.state === "unknown";
+    const v = gone ? 0 : Number(st.state) || 0;
     const colour = COLORS[c.key] || "#888";
     return `<label class="row">
       <span class="dot" style="background:${colour}"></span>
       <span class="lbl">${LABEL(c.key)}</span>
-      <input type="range" min="0" max="100" step="0.5" value="${v}" data-id="${c.id}" style="accent-color:${colour}">
-      <span class="val">${v}%</span>
+      <input type="range" min="0" max="100" step="0.5" value="${v}" data-id="${c.id}" ${gone ? "disabled" : ""} style="accent-color:${colour}">
+      <span class="val">${gone ? "—" : v + "%"}</span>
     </label>`;
   }
 
@@ -155,6 +178,7 @@ AquaIlluminationCard.css = `
   .title{font-size:1.15em;font-weight:600}
   .meta{opacity:.7}
   .warn{color:var(--error-color,#c33);margin:6px 0}
+  .off{opacity:.4;pointer-events:none}
   .toggles{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   .chip{border:1px solid var(--divider-color,#888);background:none;color:inherit;border-radius:14px;padding:4px 12px;cursor:pointer;font:inherit}
   .chip.on{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:var(--primary-color)}

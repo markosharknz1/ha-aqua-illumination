@@ -23,6 +23,7 @@ planned in the same repo — see [Roadmap](#roadmap).
 | `switch.<light>_schedule` | the light's own schedule on/off |
 | `switch.<light>_night_feeding` | manual mode, only red at 25 %; off restores the previous look and schedule |
 | `switch.<light>_lunar_cycle`, `time.<light>_lunar_start` / `_end` | lunar mode: during the window the schedule's levels are *reduced* by moon phase (it adds no light — give the schedule a low night level for a "moon") |
+| `binary_sensor.<light>_connection` | dropout detection: on while the light answers; attributes `offline_since`, `last_seen`, `dropouts`, `last_outage_seconds`, `last_error`. Offline after 2 failed polls in a row (one miss is ignored); stays available during an outage so cards/automations can react |
 | `sensor.<light>_temperature` | heatsink temperature (+ fan / thermal-shutdown attributes) |
 | `sensor.<light>_schedule_data` | diagnostic; carries the ramps for the card |
 | `sensor.<light>_device_clock`, `button.<light>_sync_clock`, `button.<light>_refresh` | clock tools |
@@ -37,7 +38,7 @@ Registered automatically. Add to a dashboard:
 type: custom:aqua-illumination-card
 entity: sensor.ai_prime_0a82_schedule_data   # your light's "Schedule data" sensor
 ```
-Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
+When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
 Night feeding / Sync clock buttons.
 
 ## Services
