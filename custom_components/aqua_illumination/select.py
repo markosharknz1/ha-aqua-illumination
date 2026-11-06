@@ -30,7 +30,7 @@ class PresetSelect(AquaEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         c = self.coordinator
-        return identify(c.data.get("schedule"), c.channels, c.saved_presets)
+        return identify(c.day_schedule(), c.channels, c.saved_presets)
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_apply_preset(option)

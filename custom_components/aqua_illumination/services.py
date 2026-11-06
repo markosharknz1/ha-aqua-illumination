@@ -5,7 +5,7 @@ Each takes ``entity_id`` - any entity that belongs to the light.
 from __future__ import annotations
 
 import voluptuous as vol
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -54,6 +54,29 @@ SET_STEALTH = vol.Schema({
     vol.Optional("dim"): cv.boolean,
     vol.Optional("intensity"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
     vol.Optional("suspend"): vol.All(vol.Coerce(float), vol.Range(min=0, max=3600)),
+})
+SET_NIGHT = vol.Schema({
+    **_BASE,
+    vol.Optional("enable"): cv.boolean,
+    vol.Optional("start"): cv.time,
+    vol.Optional("end"): cv.time,
+    vol.Optional("level"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+    vol.Optional("channels"): vol.All(cv.ensure_list, [cv.string]),
+})
+LIGHTS_OFF = vol.Schema({
+    **_BASE,
+    vol.Optional("duration"): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1440)),
+})
+PREVIEW = vol.Schema({
+    **_BASE,
+    vol.Required("levels"): {cv.string: vol.All(vol.Coerce(float), vol.Range(min=0, max=100))},
+    vol.Optional("duration", default=10): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=120)),
+})
+EXPORT_PRESETS = vol.Schema({vol.Required("entity_id"): cv.entity_id})
+IMPORT_PRESETS = vol.Schema({
+    **_BASE,
+    vol.Required("data"): vol.Any(cv.string, dict),
+    vol.Optional("replace", default=False): cv.boolean,
 })
 COPY_SCHEDULE = vol.Schema({
     vol.Required("source"): cv.entity_id,
@@ -126,7 +149,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def copy_schedule(call: ServiceCall) -> None:
         src = _coordinator(hass, call.data["source"])
         try:
-            sched = await src.client.schedule()
+            sched = src.day_schedule() or await src.client.schedule()
         except AquaIlluminationError as err:
             raise HomeAssistantError(f"source light: {err}") from err
         await _run(call, lambda c, _d: c.async_set_schedule(sched))
@@ -135,6 +158,37 @@ def async_register_services(hass: HomeAssistant) -> None:
         await _run(call, lambda c, d: c.async_set_stealth(
             d.get("enable"), d.get("dim"), d.get("intensity"), d.get("suspend")))
 
+    async def set_night_light(call: ServiceCall) -> None:
+        def mins(t):
+            return None if t is None else t.hour * 60 + t.minute
+        await _run(call, lambda c, d: c.async_set_night(
+            enable=d.get("enable"), start=mins(d.get("start")), end=mins(d.get("end")),
+            level=d.get("level"), channels=d.get("channels")))
+
+    async def lights_off(call: ServiceCall) -> None:
+        await _run(call, lambda c, d: c.async_override(None, d.get("duration"), "lights_off"))
+
+    async def cancel_lights_off(call: ServiceCall) -> None:
+        await _run(call, lambda c, _d: c.async_cancel_override())
+
+    async def preview_levels(call: ServiceCall) -> None:
+        await _run(call, lambda c, d: c.async_override(d["levels"], d["duration"], "preview"))
+
+    async def export_presets(call: ServiceCall) -> dict:
+        from .presets import export_payload
+        return export_payload(_coordinator(hass, call.data["entity_id"]).saved_presets)
+
+    async def import_presets(call: ServiceCall) -> None:
+        await _run(call, lambda c, d: c.async_import_presets(d["data"], d["replace"]))
+
+    hass.services.async_register(DOMAIN, "set_night_light", set_night_light, SET_NIGHT)
+    hass.services.async_register(DOMAIN, "lights_off", lights_off, LIGHTS_OFF)
+    hass.services.async_register(DOMAIN, "cancel_lights_off", cancel_lights_off, SYNC_CLOCK)
+    hass.services.async_register(DOMAIN, "preview_levels", preview_levels, PREVIEW)
+    hass.services.async_register(
+        DOMAIN, "export_presets", export_presets, EXPORT_PRESETS,
+        supports_response=SupportsResponse.ONLY)
+    hass.services.async_register(DOMAIN, "import_presets", import_presets, IMPORT_PRESETS)
     hass.services.async_register(DOMAIN, "set_stealth", set_stealth, SET_STEALTH)
     hass.services.async_register(DOMAIN, "apply_preset", apply_preset, SET_PRESET)
     hass.services.async_register(DOMAIN, "save_preset", save_preset, SAVE_PRESET)

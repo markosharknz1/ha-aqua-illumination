@@ -67,10 +67,11 @@ def build_schedule(key: str, channels: list[str], night_glow: bool = True) -> di
 
 
 def normalize(schedule: dict | None) -> dict:
-    """channel -> [(minute, intensity), ...]; ignores the name, which the light
-    does not keep (it always reports "default")."""
+    """channel -> [[minute, intensity], ...]; ignores the name, which the light
+    does not keep (it always reports "default"). Lists, not tuples, so the value
+    compares equal after a round trip through the JSON store."""
     return {
-        r["color"]: [(p["time"], p["intensity"]) for p in r.get("points", [])]
+        r["color"]: [[p["time"], p["intensity"]] for p in r.get("points", [])]
         for r in (schedule or {}).get("ramps", [])
     }
 
@@ -88,3 +89,41 @@ def identify(schedule: dict | None, channels: list[str], saved: dict[str, dict])
         if normalize(sched) == cur:
             return name
     return None
+
+
+EXPORT_TAG = "aqua_illumination_presets"
+
+
+def export_payload(saved: dict[str, dict]) -> dict:
+    """Shareable form of the saved presets (JSON-serialisable)."""
+    return {EXPORT_TAG: 1, "presets": {
+        name: {"ramps": sched["ramps"]} for name, sched in saved.items()}}
+
+
+def parse_import(data, channels: list[str], validate) -> dict[str, dict]:
+    """Presets from an export (dict or JSON text), validated for this light.
+
+    Raises ValueError on anything malformed, naming the offending preset. Built-in
+    names are refused so an import can never shadow them."""
+    import json
+
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except ValueError as err:
+            raise ValueError(f"not valid JSON: {err}") from err
+    if not isinstance(data, dict) or EXPORT_TAG not in data or not isinstance(data.get("presets"), dict):
+        raise ValueError("not an Aqua Illumination preset export")
+    out = {}
+    for name, sched in data["presets"].items():
+        name = str(name).strip()
+        if not name or key_for_label(name):
+            raise ValueError(f"preset name {name!r} is empty or a built-in name")
+        try:
+            clean = validate({"name": name, "ramps": (sched or {}).get("ramps")}, channels)
+        except (ValueError, KeyError, TypeError) as err:
+            raise ValueError(f"preset {name!r}: {err}") from err
+        out[name] = {"name": name, "ramps": clean["ramps"]}
+    if not out:
+        raise ValueError("the export contains no presets")
+    return out

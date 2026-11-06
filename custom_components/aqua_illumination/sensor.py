@@ -55,10 +55,21 @@ class ScheduleSensor(AquaEntity, SensorEntity):
     def native_value(self):
         return (self.coordinator.data.get("schedule") or {}).get("name")
 
+    # Big blobs the card reads live; no need to keep them in the recorder.
+    _unrecorded_attributes = frozenset({"ramps", "day_ramps", "saved_presets"})
+
     @property
     def extra_state_attributes(self):
-        s = self.coordinator.data.get("schedule") or {}
-        return {"ramps": s.get("ramps", []), "host": self.coordinator.client.host}
+        c = self.coordinator
+        s = c.data.get("schedule") or {}
+        day = c.day_schedule() or {}
+        return {
+            "ramps": s.get("ramps", []),          # what the light is running (incl. night glow)
+            "day_ramps": day.get("ramps", []),    # what the editor edits
+            "night": c.night,
+            "saved_presets": c.saved_presets,
+            "host": c.client.host,
+        }
 
 
 class ClockSensor(AquaEntity, SensorEntity):

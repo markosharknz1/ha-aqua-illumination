@@ -12,6 +12,9 @@ from .const import (
     CONF_HOST,
     CONF_POLL_INTERVAL,
     DEFAULT_AUTO_CLOCK,
+    CONF_NIGHT_FEED_CHANNELS,
+    CONF_NIGHT_FEED_LEVEL,
+    DEFAULT_NIGHT_FEED_LEVEL,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
 )
@@ -32,8 +35,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
         entry.options.get(CONF_AUTO_CLOCK, DEFAULT_AUTO_CLOCK),
     )
+    coordinator.night_feed_level = float(entry.options.get(CONF_NIGHT_FEED_LEVEL, DEFAULT_NIGHT_FEED_LEVEL))
+    coordinator.night_feed_channels = list(entry.options.get(CONF_NIGHT_FEED_CHANNELS, []))
+    await coordinator.async_load_store()
     await coordinator.async_config_entry_first_refresh()
     await coordinator.async_load_extras()
+    entry.async_on_unload(coordinator.async_shutdown)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))

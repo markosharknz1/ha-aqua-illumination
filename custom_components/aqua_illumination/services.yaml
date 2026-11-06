@@ -132,3 +132,96 @@ set_stealth:
           min: 0
           max: 3600
           unit_of_measurement: s
+set_night_light:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    enable:
+      selector:
+        boolean:
+    start:
+      selector:
+        time:
+    end:
+      selector:
+        time:
+    level:
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    channels:
+      example: '["blue", "deep_blue"]'
+      selector:
+        object:
+lights_off:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    duration:
+      selector:
+        number:
+          min: 0.5
+          max: 1440
+          unit_of_measurement: min
+cancel_lights_off:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+preview_levels:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    levels:
+      required: true
+      example: '{"blue": 40, "deep_blue": 60}'
+      selector:
+        object:
+    duration:
+      default: 10
+      selector:
+        number:
+          min: 0.5
+          max: 120
+          unit_of_measurement: min
+export_presets:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+import_presets:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    data:
+      required: true
+      selector:
+        text:
+          multiline: true
+    replace:
+      default: false
+      selector:
+        boolean:

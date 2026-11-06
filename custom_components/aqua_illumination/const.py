@@ -5,6 +5,9 @@ CONF_HOST = "host"
 CONF_NAME = "name"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_AUTO_CLOCK = "auto_clock"
+CONF_NIGHT_FEED_LEVEL = "night_feed_level"
+CONF_NIGHT_FEED_CHANNELS = "night_feed_channels"
+DEFAULT_NIGHT_FEED_LEVEL = 25  # percent
 
 DEFAULT_POLL_INTERVAL = 30  # seconds
 DEFAULT_AUTO_CLOCK = True

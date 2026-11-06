@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -23,7 +24,8 @@ from .const import (
     SCHEDULE_REFRESH_EVERY,
 )
 from .dropout import DropoutTracker
-from .presets import build_schedule, key_for_label
+from .night import clean_night, compose, default_night
+from .presets import build_schedule, key_for_label, normalize
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,11 +52,38 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         self._store = Store(hass, 1, f"{DOMAIN}.presets.{self.serial}")
         self.saved_presets: dict[str, dict] = {}
         self.power_max: dict[str, float] = {}  # channel -> mW at 100 %
+        # Schedule layers: what the user edits (day) + a night glow composed on top.
+        self.day: dict | None = None
+        self.night: dict = {}
+        self._stored_night: dict = {}
+        self._store_loaded = False
+        self._written: dict | None = None  # normalised schedule we last put on the light
+        # A temporary manual hold (lights off / preview); the previous look is restored after.
+        self.override: dict | None = None
+        self._override_unsub = None
+        self.night_feed_level: float = 25.0
+        self.night_feed_channels: list[str] = []
+
+    async def async_load_store(self) -> None:
+        """Read the saved layers/presets/hold. Must run BEFORE the first refresh:
+        the first poll saves, and saving before loading would wipe what was stored."""
+        stored = await self._store.async_load() or {}
+        self.saved_presets = stored.get("presets", {})
+        self.day = stored.get("day")
+        self._written = stored.get("written")
+        self._stored_night = stored.get("night") or {}
+        self.override = stored.get("override")
+        self._store_loaded = True
 
     async def async_load_extras(self) -> None:
-        """Saved presets + the light's per-channel wattage (both best effort)."""
-        stored = await self._store.async_load()
-        self.saved_presets = (stored or {}).get("presets", {})
+        """Night config (needs the channel list), re-arm a held timer, and the
+        light's per-channel wattage (best effort). Runs after the first refresh."""
+        try:
+            self.night = clean_night(self._stored_night, self.channels)
+        except ValueError:
+            self.night = default_night(self.channels)
+        if self.override:
+            self._arm_override()
         try:
             power = await self.client.power()
         except AquaIlluminationError:
@@ -66,6 +95,36 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         if isinstance(norm, dict):
             self.power_max = {k: float(v) for k, v in norm.items()
                               if isinstance(v, (int, float))}
+
+    async def _async_save(self) -> None:
+        if not self._store_loaded:  # never overwrite what has not been read yet
+            _LOGGER.debug("%s: store not loaded yet; skipping save", self.name)
+            return
+        await self._store.async_save({
+            "presets": self.saved_presets, "day": self.day, "night": self.night,
+            "written": self._written, "override": self.override,
+        })
+
+    def day_schedule(self) -> dict | None:
+        """The schedule as the user edits it (without the night glow)."""
+        return self.day or (self.data or {}).get("schedule")
+
+    def _reconcile(self, light: dict) -> bool:
+        """Compare the light's schedule with what we last wrote. A difference means
+        something else (the vendor app) changed it: adopt it as the new day layer.
+        Returns True if our stored layers changed."""
+        cur = normalize(light)
+        if self.day is None or self._written is None:
+            self.day, self._written = light, cur
+            return True
+        if cur != self._written:
+            _LOGGER.warning(
+                "%s: schedule changed outside Home Assistant; adopting it as the day layer",
+                self.name,
+            )
+            self.day, self._written = light, cur
+            return True
+        return False
 
     def power_estimate_w(self) -> float | None:
         """Estimated draw from channel levels x rated per-channel wattage."""
@@ -84,16 +143,28 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         name = name.strip()
         if not name or key_for_label(name):
             raise ValueError("pick a name that is not a built-in preset")
-        sched = await self.client.schedule()
+        sched = self.day_schedule() or await self.client.schedule()
         self.saved_presets[name] = {"name": name, "ramps": sched["ramps"]}
-        await self._store.async_save({"presets": self.saved_presets})
+        await self._async_save()
         self.async_update_listeners()
 
     async def async_delete_preset(self, name: str) -> None:
         if self.saved_presets.pop(name, None) is None:
             raise ValueError(f"no saved preset {name!r}")
-        await self._store.async_save({"presets": self.saved_presets})
+        await self._async_save()
         self.async_update_listeners()
+
+    async def async_import_presets(self, data, replace: bool = False) -> int:
+        from .presets import parse_import
+
+        new = parse_import(data, self.channels, validate_schedule)
+        clash = [n for n in new if n in self.saved_presets]
+        if clash and not replace:
+            raise ValueError(f"already saved: {', '.join(clash)} (set replace to overwrite)")
+        self.saved_presets.update(new)
+        await self._async_save()
+        self.async_update_listeners()
+        return len(new)
 
     async def async_apply_preset(self, name: str, night_glow: bool = True) -> None:
         key = key_for_label(name)
@@ -164,11 +235,14 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
             enabled = await self.client.schedule_enabled()
             temperature = await self.client.temperature()
             clock = await self.client.time()
+            fresh = None
             if self._schedule is None or self._polls % SCHEDULE_REFRESH_EVERY == 0:
-                self._schedule = await self.client.schedule()
+                fresh = self._schedule = await self.client.schedule()
         except AquaIlluminationError as err:
             raise UpdateFailed(str(err)) from err
         self._polls += 1
+        if fresh is not None and self._reconcile(fresh):
+            await self._async_save()
         lunar = None
         try:
             lunar = await self.client.lunar()
@@ -274,7 +348,87 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         await self.async_request_refresh()
 
     async def async_set_schedule(self, schedule: dict) -> None:
-        clean = validate_schedule(schedule, self.channels)
-        await self.client.set_schedule(clean)
+        """Write a schedule as the DAY layer; the night glow (if on) is composed on top."""
+        self.day = validate_schedule(schedule, self.channels)
+        await self._write_composed()
+
+    async def _write_composed(self) -> None:
+        day = self.day or validate_schedule(
+            (self.data or {}).get("schedule") or await self.client.schedule(), self.channels)
+        self.day = day
+        composed = validate_schedule(compose(day, self.night), self.channels)
+        await self.client.set_schedule(composed)
+        self._written = normalize(composed)
+        await self._async_save()
         self._schedule = None  # force a re-read
         await self.async_request_refresh()
+
+    async def async_set_night(self, **changes) -> None:
+        """Change the night-light layer; unspecified fields keep their value."""
+        self.night = clean_night(
+            {**self.night, **{k: v for k, v in changes.items() if v is not None}},
+            self.channels,
+        )
+        await self._write_composed()
+
+    # -- temporary overrides (lights off / preview) --------------------
+    async def async_override(
+        self, levels: dict[str, float] | None, minutes: float | None, reason: str
+    ) -> None:
+        """Hold manual levels (``None`` = everything off) for ``minutes`` (``None`` =
+        until cancelled); the previous colours and schedule on/off are restored after."""
+        d = self.data or {}
+        if self.override is None:
+            self.override = {
+                "colors": dict(d.get("colors") or {}),
+                "schedule_enabled": d.get("schedule_enabled", True),
+            }
+        until = None if minutes is None else dt_util.utcnow() + timedelta(minutes=minutes)
+        self.override.update(until=until.isoformat() if until else None, reason=reason)
+        full = {c: 0 for c in self.channels}
+        full.update(levels or {})
+        await self.async_set_channels(full)
+        await self._async_save()
+        self._arm_override()
+        self.async_update_listeners()
+
+    async def async_cancel_override(self) -> None:
+        if self.override is None:
+            return
+        prev = self.override
+        self._cancel_override_timer()
+        await self.client.set_colors(dict(prev["colors"]))
+        await self.client.set_schedule_enabled(bool(prev["schedule_enabled"]))
+        self.override = None
+        await self._async_save()
+        await self.async_request_refresh()
+
+    def _cancel_override_timer(self) -> None:
+        if self._override_unsub:
+            self._override_unsub()
+            self._override_unsub = None
+
+    def _arm_override(self, retry_seconds: float | None = None) -> None:
+        self._cancel_override_timer()
+        until = (self.override or {}).get("until")
+        if not until:
+            return
+        when = dt_util.parse_datetime(until)
+        if when is None:
+            return
+        if retry_seconds is not None:
+            when = dt_util.utcnow() + timedelta(seconds=retry_seconds)
+
+        async def _expire(_now) -> None:
+            self._override_unsub = None
+            try:
+                await self.async_cancel_override()
+            except AquaIlluminationError as err:
+                _LOGGER.warning("%s: could not restore after hold (%s); retrying", self.name, err)
+                self._arm_override(retry_seconds=60)
+
+        self._override_unsub = async_track_point_in_utc_time(self.hass, _expire, when)
+
+    async def async_shutdown(self) -> None:
+        self._cancel_override_timer()
+        await super().async_shutdown()

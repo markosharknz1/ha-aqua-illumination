@@ -4,6 +4,7 @@ import importlib.util
 import pathlib
 import sys
 
+import aiohttp
 import pytest
 from aiohttp import web
 
@@ -151,3 +152,40 @@ async def test_lunar_roundtrip(light):
     assert (await c.lunar())["start"] == 1200
     await c.set_lunar(False, 1080, 300)
     assert fake.lunar == {"enable": False, "start": 1080, "end": 300}
+
+
+# ---- discovery -----------------------------------------------------------
+disc_spec = importlib.util.spec_from_file_location("aqua_discovery", ROOT / "discovery.py")
+disc = importlib.util.module_from_spec(disc_spec)
+sys.modules["aqua_discovery"] = disc
+disc_spec.loader.exec_module(disc)
+
+
+def test_hosts_from_cidr_and_limits():
+    assert disc.hosts_from_cidr("10.0.0.0/30") == ["10.0.0.1", "10.0.0.2"]
+    assert disc.hosts_from_cidr("10.0.0.5") == ["10.0.0.5"]
+    with pytest.raises(ValueError):
+        disc.hosts_from_cidr("10.0.0.0/8")
+    with pytest.raises(ValueError):
+        disc.hosts_from_cidr("nonsense")
+
+
+def test_adapter_networks_caps_at_24_and_skips_loopback():
+    ads = [
+        {"enabled": True, "ipv4": [{"address": "10.42.1.106", "network_prefix": 16}]},
+        {"enabled": True, "ipv4": [{"address": "127.0.0.1", "network_prefix": 8}]},
+        {"enabled": False, "ipv4": [{"address": "192.168.9.9", "network_prefix": 24}]},
+        {"enabled": True, "ipv4": [{"address": "192.168.1.5", "network_prefix": 28}]},
+    ]
+    assert disc.adapter_networks(ads) == ["10.42.1.0/24", "192.168.1.0/28"]
+
+
+async def test_scan_finds_only_lights(aiohttp_client):
+    fake = FakePrime()
+    app = fake.app()
+    client = await aiohttp_client(app)
+    host = f"{client.server.host}:{client.server.port}"
+    async with aiohttp.ClientSession() as s:
+        found = await disc.scan(s, [host, "127.0.0.1:1"], timeout=1.5)
+    assert [h for h, _ in found] == [host]
+    assert found[0][1]["serial_number"] == "AABBCCDDEEFF"

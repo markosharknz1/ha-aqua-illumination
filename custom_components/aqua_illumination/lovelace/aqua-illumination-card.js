@@ -6,7 +6,7 @@
  *
  * Every other entity is derived from the sensor's name, so one line is enough.
  */
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.5.0";
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
 const COLORS = {
@@ -15,6 +15,19 @@ const COLORS = {
   cool_white: "#d8e4f0", neutral_white: "#e8e2cf", warm_white: "#f1d9a0",
   green: "#3fb26b",
 };
+// Linear interpolation of a ramp, flat before the first / after the last point (same as the integration).
+const valueAt = (pts, m) => {
+  if (!pts.length) return 0;
+  if (m <= pts[0].time) return pts[0].intensity;
+  for (let i = 1; i < pts.length; i++) {
+    if (m <= pts[i].time) {
+      const a = pts[i - 1], b = pts[i], span = b.time - a.time;
+      return span <= 0 ? b.intensity : a.intensity + ((b.intensity - a.intensity) * (m - a.time)) / span;
+    }
+  }
+  return pts[pts.length - 1].intensity;
+};
+const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const LABEL = (k) => k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 class AquaIlluminationCard extends HTMLElement {
@@ -32,13 +45,14 @@ class AquaIlluminationCard extends HTMLElement {
   }
 
   getCardSize() { return 8; }
+  static getConfigElement() { return document.createElement("aqua-illumination-card-editor"); }
   static getStubConfig() { return { entity: "sensor.ai_prime_0000_schedule_data" }; }
 
   set hass(hass) {
     this._hass = hass;
     // Don't rebuild while the user is dragging a slider.
     // ...or while the schedule editor is open (it draws itself).
-    if (this._dragging || this._edit) return;
+    if (this._dragging || this._edit || this._sheet) return;
     this._render();
   }
 
@@ -68,6 +82,9 @@ class AquaIlluminationCard extends HTMLElement {
       : [sched.state, (this._e("switch", "schedule") || {}).state].includes("unavailable");
     // Entities blank out while offline - keep the last good schedule for the chart.
     if ((sched.attributes.ramps || []).length) this._lastRamps = sched.attributes.ramps;
+    if ((sched.attributes.day_ramps || []).length) this._lastDay = sched.attributes.day_ramps;
+    const night = sched.attributes.night || {};
+    const lightsOff = this._e("switch", "lights_off");
     const ramps = sched.attributes.ramps || this._lastRamps || [];
     const temp = this._e("sensor", "temperature");
     const clock = this._e("sensor", "device_clock");
@@ -105,6 +122,12 @@ class AquaIlluminationCard extends HTMLElement {
           <button class="chip" data-act="edit">Edit schedule</button>
           <button class="chip" data-act="save">Save as preset…</button>
         </div>
+        <div class="presets ${offline ? "off" : ""}">
+          <button class="chip ${night.enable ? "on" : ""}" data-act="night">Night light${night.enable ? " on" : ""}</button>
+          ${lightsOff ? `<button class="chip ${lightsOff.state === "on" ? "on" : ""}" data-act="off">${lightsOff.state === "on" ? "Resume" : "Lights off…"}</button>` : ""}
+          <button class="chip" data-act="export">Export presets</button>
+          <button class="chip" data-act="import">Import…</button>
+        </div>
         <div class="sliders ${offline ? "off" : ""}">
           ${chans.map((c) => this._slider(c)).join("")}
         </div>
@@ -117,7 +140,7 @@ class AquaIlluminationCard extends HTMLElement {
 
   // ---- schedule editor ------------------------------------------------
   _startEdit() {
-    const ramps = (this._lastRamps || []).map((r) => ({
+    const ramps = (this._lastDay || this._lastRamps || []).map((r) => ({
       color: r.color, points: (r.points || []).map((p) => ({ time: p.time, intensity: p.intensity })),
     }));
     if (!ramps.length) { alert("No schedule loaded yet."); return; }
@@ -136,6 +159,12 @@ class AquaIlluminationCard extends HTMLElement {
       <div class="toggles">${e.ramps.map((x) => `<button class="chip ${x.color === e.sel ? "on" : ""}" data-sel="${x.color}"
         style="${x.color === e.sel ? `background:${COLORS[x.color] || "#888"};border-color:${COLORS[x.color] || "#888"}` : ""}">${LABEL(x.color)}</button>`).join("")}</div>
       <svg viewBox="0 0 360 150" class="chart edit" data-chart></svg>
+      <div class="presets">
+        <span>Preview on light at</span>
+        <input type="range" min="0" max="1439" step="5" value="${e.prevAt ?? 720}" data-prev style="flex:1">
+        <span data-prevt>${hhmm(e.prevAt ?? 720)}</span>
+        ${e.previewing ? `<button class="chip on" data-edit="endprev">End preview</button>` : ""}
+      </div>
       <div class="foot" data-pt>${e.pt !== null ? this._pointText() : "Drag a point · click empty space to add one"}</div>
       <div class="toggles">
         <button class="chip" data-edit="del" ${canDel ? "" : "disabled"}>Delete point</button>
@@ -149,11 +178,26 @@ class AquaIlluminationCard extends HTMLElement {
     this._card.querySelectorAll("[data-edit]").forEach((b) => {
       b.onclick = () => {
         const a = b.dataset.edit;
-        if (a === "cancel") { this._edit = null; this._render(); }
+        if (a === "cancel") { this._endPreview().then(() => { this._edit = null; this._render(); }); }
         if (a === "del" && canDel) { r.points.splice(e.pt, 1); e.pt = null; this._renderEdit(); }
         if (a === "save") this._saveEdit();
+        if (a === "endprev") this._endPreview().then(() => this._renderEdit());
       };
     });
+    const pv = this._card.querySelector("[data-prev]");
+    if (pv) {
+      pv.oninput = () => { this._card.querySelector("[data-prevt]").textContent = hhmm(Number(pv.value)); };
+      pv.onchange = async () => {
+        e.prevAt = Number(pv.value);
+        const levels = {};
+        for (const r of e.ramps) levels[r.color] = Math.round(valueAt(r.points, e.prevAt)) / 10;
+        try {
+          await this._hass.callService("aqua_illumination", "preview_levels", {
+            entity_id: this._config.entity, levels, duration: 10 });
+          if (!e.previewing) { e.previewing = true; this._renderEdit(); }
+        } catch (err) { alert(`Preview failed: ${err.message || err}`); }
+      };
+    }
     this._wireChart();
   }
 
@@ -238,9 +282,94 @@ class AquaIlluminationCard extends HTMLElement {
         entity_id: this._config.entity, name: e.name, ramps: e.ramps,
       });
     } catch (err) { alert(`Could not save: ${err.message || err}`); return; }
-    this._lastRamps = e.ramps;
+    this._lastDay = e.ramps;
+    await this._endPreview();
     this._edit = null;
     this._render();
+  }
+
+  async _endPreview() {
+    const e = this._edit;
+    if (!e || !e.previewing) return;
+    e.previewing = false;
+    try { await this._hass.callService("aqua_illumination", "cancel_lights_off", { entity_id: this._config.entity }); }
+    catch (err) { alert(`Could not end the preview: ${err.message || err}`); }
+  }
+
+  // ---- night light ------------------------------------------------------
+  _startNight() {
+    const sched = this._hass.states[this._config.entity];
+    const n = (sched && sched.attributes.night) || {};
+    this._sheet = {
+      enable: !!n.enable, start: n.start ?? 1200, end: n.end ?? 420,
+      level: n.level ?? 5, channels: [...(n.channels || [])],
+    };
+    this._renderNight();
+  }
+
+  _renderNight() {
+    const n = this._sheet;
+    const chans = this._channels().map((c) => c.key);
+    this._card.innerHTML = `<div class="pad">
+      <div class="head"><div class="title">Night light</div></div>
+      <div class="foot">A low glow on the channels you pick, laid over the schedule between these times. Lunar mode then dims it by moon phase.</div>
+      <div class="presets"><label><input type="checkbox" data-n="enable" ${n.enable ? "checked" : ""}> Enabled</label></div>
+      <div class="presets"><span>From</span><input type="time" data-n="start" value="${hhmm(n.start)}">
+        <span>to</span><input type="time" data-n="end" value="${hhmm(n.end)}"></div>
+      <div class="presets"><span>Level</span><input type="range" min="0" max="30" step="0.5" value="${n.level}" data-n="level" style="flex:1"><span data-lv>${n.level}%</span></div>
+      <div class="toggles">${chans.map((c) => `<button class="chip ${n.channels.includes(c) ? "on" : ""}" data-ch="${c}">${LABEL(c)}</button>`).join("")}</div>
+      <div class="toggles"><button class="chip on" data-nsave>Save</button><button class="chip" data-ncancel>Cancel</button></div></div>`;
+    const q = (sel) => this._card.querySelector(sel);
+    const mins = (v) => { const [h, m] = v.split(":").map(Number); return h * 60 + m; };
+    q('[data-n=enable]').onchange = (ev) => { n.enable = ev.target.checked; };
+    q('[data-n=start]').onchange = (ev) => { if (ev.target.value) n.start = mins(ev.target.value); };
+    q('[data-n=end]').onchange = (ev) => { if (ev.target.value) n.end = mins(ev.target.value); };
+    q('[data-n=level]').oninput = (ev) => { n.level = Number(ev.target.value); q("[data-lv]").textContent = `${n.level}%`; };
+    this._card.querySelectorAll("[data-ch]").forEach((b) => {
+      b.onclick = () => {
+        const c = b.dataset.ch;
+        n.channels = n.channels.includes(c) ? n.channels.filter((x) => x !== c) : [...n.channels, c];
+        b.classList.toggle("on");
+      };
+    });
+    q("[data-ncancel]").onclick = () => { this._sheet = null; this._render(); };
+    q("[data-nsave]").onclick = async () => {
+      if (n.enable && !n.channels.length) { alert("Pick at least one channel."); return; }
+      const t = (m) => `${hhmm(m)}:00`;
+      try {
+        await this._hass.callService("aqua_illumination", "set_night_light", {
+          entity_id: this._config.entity, enable: n.enable, start: t(n.start), end: t(n.end),
+          level: n.level, channels: n.channels });
+      } catch (err) { alert(`Could not save: ${err.message || err}`); return; }
+      this._sheet = null; this._render();
+    };
+  }
+
+  // ---- preset import / export -------------------------------------------
+  async _exportPresets() {
+    const sched = this._hass.states[this._config.entity];
+    const saved = (sched && sched.attributes.saved_presets) || {};
+    const names = Object.keys(saved);
+    if (!names.length) { alert("No saved presets yet - use \"Save as preset…\" first."); return; }
+    const presets = {};
+    for (const n of names) presets[n] = { ramps: saved[n].ramps };
+    const text = JSON.stringify({ aqua_illumination_presets: 1, presets });
+    try { await navigator.clipboard.writeText(text); alert(`Copied ${names.length} preset(s) to the clipboard.`); }
+    catch (err) { prompt("Copy this text:", text); }
+  }
+
+  async _importPresets() {
+    const text = prompt("Paste exported presets:");
+    if (!text) return;
+    const go = (replace) => this._hass.callService("aqua_illumination", "import_presets", {
+      entity_id: this._config.entity, data: text, replace });
+    try { await go(false); alert("Imported."); }
+    catch (err) {
+      const msg = String((err && err.message) || err);
+      if (/already saved/.test(msg) && confirm(`${msg}\n\nReplace them?`)) {
+        try { await go(true); alert("Imported."); } catch (e2) { alert(`Import failed: ${e2.message || e2}`); }
+      } else if (!/already saved/.test(msg)) alert(`Import failed: ${msg}`);
+    }
   }
 
   _dur(sec) {
@@ -311,6 +440,17 @@ class AquaIlluminationCard extends HTMLElement {
           call("aqua_illumination", "save_preset", { entity_id: this._config.entity, name });
         }
         if (a === "edit") this._startEdit();
+        if (a === "night") this._startNight();
+        if (a === "off") {
+          const sw = this._e("switch", "lights_off");
+          if (sw && sw.state === "on") { call("aqua_illumination", "cancel_lights_off", { entity_id: this._config.entity }); return; }
+          const txt = prompt("Lights off for how many minutes? (blank = until you resume)", "30");
+          if (txt === null) return;
+          const mins = parseFloat(txt);
+          call("aqua_illumination", "lights_off", Object.assign({ entity_id: this._config.entity }, mins > 0 ? { duration: mins } : {}));
+        }
+        if (a === "export") this._exportPresets();
+        if (a === "import") this._importPresets();
       };
     });
     this._card.querySelectorAll("input[type=range]").forEach((inp) => {
@@ -350,7 +490,33 @@ AquaIlluminationCard.css = `
   .foot{margin-top:8px;font-size:.8em;opacity:.6}
 `;
 
+class AquaIlluminationCardEditor extends HTMLElement {
+  setConfig(config) { this._config = config; this._draw(); }
+  set hass(hass) { this._hass = hass; this._draw(); }
+  _draw() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (sch) => ({ entity: "Light (its 'Schedule data' sensor)", name: "Name (optional)" }[sch.name] || sch.name);
+      this._form.addEventListener("value-changed", (ev) => {
+        const cfg = Object.assign({}, this._config, ev.detail.value);
+        if (!cfg.name) delete cfg.name;
+        this._config = cfg;
+        this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: cfg }, bubbles: true, composed: true }));
+      });
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = [
+      { name: "entity", required: true, selector: { entity: { domain: "sensor", integration: "aqua_illumination" } } },
+      { name: "name", selector: { text: {} } },
+    ];
+    this._form.data = this._config;
+  }
+}
+
 customElements.define("aqua-illumination-card", AquaIlluminationCard);
+customElements.define("aqua-illumination-card-editor", AquaIlluminationCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "aqua-illumination-card",

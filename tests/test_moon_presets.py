@@ -63,3 +63,86 @@ def test_identify_ignores_name_and_finds_presets():
     assert presets.identify(mine, CH, {"Mine": mine}) == "Mine"
     assert presets.identify(mine, CH, {}) is None
     assert presets.identify(None, CH, {}) is None
+
+
+night = load("night")
+
+
+def _day(ch="blue"):
+    pts = [{"time": 0, "intensity": 0}, {"time": 480, "intensity": 0},
+           {"time": 600, "intensity": 600}, {"time": 1080, "intensity": 600},
+           {"time": 1200, "intensity": 0}, {"time": 1439, "intensity": 0}]
+    return {"name": "default", "ramps": [{"color": c, "points": [dict(p) for p in pts]} for c in (ch, "uv")]}
+
+
+def _val(sched, color, t):
+    return night.value_at(next(r for r in sched["ramps"] if r["color"] == color)["points"], t)
+
+
+def test_night_disabled_is_identity():
+    day = _day()
+    assert night.compose(day, {"enable": False, "start": 1200, "end": 420, "level": 5, "channels": ["blue"]}) is day
+
+
+def test_night_wraps_midnight_and_only_touches_chosen_channels():
+    day = _day()
+    n = {"enable": True, "start": 1200, "end": 420, "level": 5, "channels": ["blue"]}
+    out = night.compose(day, n)
+    api.validate_schedule(out, ["blue", "uv"])  # still a valid schedule
+    for t in (0, 100, 300, 410, 1210, 1300, 1439):   # inside the window
+        assert _val(out, "blue", t) == 50
+    for t in (480, 540, 600, 800, 1080, 1150):        # outside: day curve unchanged
+        assert abs(_val(out, "blue", t) - _val(day, "blue", t)) < 1
+    assert all(_val(out, "uv", t) == _val(day, "uv", t) for t in (0, 300, 700, 1300))
+    assert night.compose(day, n)["ramps"][1] is day["ramps"][1]
+
+
+def test_night_does_not_mutate_day_layer():
+    day = _day()
+    snap = presets.normalize(day)
+    night.compose(day, {"enable": True, "start": 1200, "end": 420, "level": 5, "channels": ["blue"]})
+    assert presets.normalize(day) == snap
+
+
+def test_night_window_inside_one_day_and_edges():
+    day = _day()
+    out = night.compose(day, {"enable": True, "start": 0, "end": 300, "level": 10, "channels": ["blue"]})
+    assert _val(out, "blue", 0) == 100 and _val(out, "blue", 299) == 100
+    assert _val(out, "blue", 700) == _val(day, "blue", 700)
+    out2 = night.compose(day, {"enable": True, "start": 600, "end": 600, "level": 10, "channels": ["blue"]})
+    assert out2 is day  # empty window
+
+
+def test_clean_night_validation():
+    ch = ["blue", "uv"]
+    assert night.default_night(ch)["channels"] == ["blue"]
+    assert night.clean_night({"level": 7, "start": 60}, ch)["level"] == 7.0
+    for bad in ({"level": 101}, {"start": 2000}, {"channels": ["nope"]}):
+        try:
+            night.clean_night(bad, ch)
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+
+
+def test_export_import_roundtrip_and_validation():
+    sched = presets.build_schedule("coral_growth", CH, False)
+    saved = {"Mine": {"name": "Mine", "ramps": sched["ramps"]}}
+    payload = presets.export_payload(saved)
+    import json
+    back = presets.parse_import(json.dumps(payload), CH, api.validate_schedule)
+    assert presets.normalize(back["Mine"]) == presets.normalize(saved["Mine"])
+    for bad in ("not json", "{}", json.dumps({presets.EXPORT_TAG: 1, "presets": {}}),
+                json.dumps({presets.EXPORT_TAG: 1, "presets": {"Coral growth": {"ramps": sched["ramps"]}}}),
+                json.dumps({presets.EXPORT_TAG: 1, "presets": {"X": {"ramps": sched["ramps"][:2]}}})):
+        try:
+            presets.parse_import(bad, CH, api.validate_schedule)
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+
+
+def test_normalize_survives_json_roundtrip():
+    import json
+    n = presets.normalize(presets.build_schedule("standard", CH, True))
+    assert json.loads(json.dumps(n)) == n

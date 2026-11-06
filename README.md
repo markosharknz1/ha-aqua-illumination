@@ -22,6 +22,8 @@ planned in the same repo — see [Roadmap](#roadmap).
 | `number.<light>_<channel>` | each colour channel, 0–100 % |
 | `switch.<light>_schedule` | the light's own schedule on/off |
 | `switch.<light>_night_feeding` | manual mode, only red at 25 %; off restores the previous look and schedule |
+| `switch.<light>_night_light` | a low glow on chosen channels over a night window, laid over the schedule (window/level/channels: `set_night_light` or the card). The schedule you edit stays separate, so editing it never loses the glow |
+| `switch.<light>_lights_off` | lights off until switched back on, or for a set time (`lights_off` service); the previous look and schedule come back, even across a restart |
 | `switch.<light>_lunar_cycle`, `time.<light>_lunar_start` / `_end` | lunar mode: during the window the schedule's levels are *reduced* by moon phase (it adds no light — give the schedule a low night level for a "moon") |
 | `binary_sensor.<light>_connection` | dropout detection: on while the light answers; attributes `offline_since`, `last_seen`, `dropouts`, `last_outage_seconds`, `last_error`. Offline after 2 failed polls in a row (one miss is ignored); stays available during an outage so cards/automations can react |
 | `select.<light>_schedule_preset` | built-in looks (Standard day, Coral growth, Acclimation) plus presets you saved; picking one rewrites the light's schedule |
@@ -42,14 +44,25 @@ Registered automatically. Add to a dashboard:
 type: custom:aqua-illumination-card
 entity: sensor.ai_prime_0a82_schedule_data   # your light's "Schedule data" sensor
 ```
-When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. **Edit schedule** opens a point editor: pick a channel, drag points, click empty space to add one, then Save to light. A preset picker applies/saves looks. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
+When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. **Edit schedule** opens a point editor: pick a channel, drag points, click empty space to add one, then Save to light. A preset picker applies/saves looks, with **Export presets** / **Import…** to share them, **Night light…** for the glow layer, **Lights off…** for a timed hold, and a **Preview on light** slider in the editor that shows the draft on the real light before you save. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
 Night feeding / Sync clock buttons.
+
+## Setup, options, dashboard
+- **Add integration** offers *Enter the IP* or *Search my network* (scans your subnet for lights, or the networks you list). Lights that change address are re-found by DHCP discovery.
+- **Options**: poll interval, automatic clock, and Night feeding **level** and **channels** (none ticked = the red channels).
+- **Download diagnostics** from the device page (addresses and serials are redacted).
+- **Dashboard**: `python dashboards/generate_dashboard.py ai_prime_0a82 --title "Reef lights" > aqua.yaml` writes a ready dashboard (card, controls, history) for one or more lights.
+- The card has a visual editor (pick the light's *Schedule data* sensor).
 
 ## Services
 - `aqua_illumination.set_channels` — `levels: {blue: 40, deep_blue: 60}` (percent)
 - `aqua_illumination.set_schedule` — `ramps: [{color, points: [{time: minutes, intensity: 0-1000}]}]`
   (every channel needs a ramp; times strictly increasing 0–1440)
 - `aqua_illumination.set_lunar` — `enable`, `start`, `end` (lunar window; reduces schedule levels by moon phase)
+- `aqua_illumination.set_night_light` — any of `enable`, `start`, `end`, `level` (%), `channels`
+- `aqua_illumination.lights_off` (`duration` minutes, blank = until resumed) / `cancel_lights_off`
+- `aqua_illumination.preview_levels` — hold `levels` (%) for `duration` minutes (default 10), then the previous look returns. The card's editor uses it to preview a draft at any time of day
+- `aqua_illumination.export_presets` (returns the saved presets as data) / `import_presets` (`data` = the exported text, `replace`)
 - `aqua_illumination.set_stealth` — any of `enable`, `dim`, `intensity` (%), `suspend` (s)
 - `aqua_illumination.sync_clock`
 - `aqua_illumination.apply_preset` / `save_preset` / `delete_preset` — built-in or saved schedules (`save_preset` stores the light's current schedule)

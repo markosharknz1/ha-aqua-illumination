@@ -1,7 +1,11 @@
 {
   "config": {
     "step": {
-      "user": {
+      "confirm": {
+        "title": "Aqua Illumination light",
+        "description": "Found {name} at {host}. Set it up?"
+      },
+      "manual": {
         "title": "Aqua Illumination light",
         "description": "Enter the light's IP address (give it a DHCP reservation so it never moves). For linked lights, use the parent.",
         "data": {
@@ -9,14 +13,32 @@
           "name": "Name (optional)"
         }
       },
-      "confirm": {
+      "user": {
         "title": "Aqua Illumination light",
-        "description": "Found {name} at {host}. Set it up?"
+        "menu_options": {
+          "manual": "Enter the light's IP address",
+          "search": "Search my network"
+        }
+      },
+      "search": {
+        "title": "Search my network",
+        "description": "Leave blank to scan this Home Assistant's own network, or list networks such as 192.168.1.0/24 (space separated).",
+        "data": {
+          "networks": "Networks to scan (optional)"
+        }
+      },
+      "pick": {
+        "title": "Pick a light",
+        "data": {
+          "host": "Light"
+        }
       }
     },
     "error": {
       "cannot_connect": "Could not reach an Aqua Illumination light at that address.",
-      "not_parent": "That light is a child of a linked pair - use the parent light's address."
+      "not_parent": "That light is a child of a linked pair - use the parent light's address.",
+      "bad_network": "That is not a valid network (use e.g. 192.168.1.0/24).",
+      "none_found": "No new lights answered. Check it is powered and on the same network."
     },
     "abort": {
       "already_configured": "That light is already set up.",
@@ -29,7 +51,9 @@
       "init": {
         "data": {
           "poll_interval": "Poll interval (seconds)",
-          "auto_clock": "Keep the light's clock correct automatically"
+          "auto_clock": "Keep the light's clock correct automatically",
+          "night_feed_level": "Night feeding level (%)",
+          "night_feed_channels": "Night feeding channels (none ticked = the red channels)"
         }
       }
     }

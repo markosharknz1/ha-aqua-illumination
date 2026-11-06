@@ -8,12 +8,11 @@ from .const import DOMAIN
 from .entity import AquaEntity
 
 NIGHT_FEED_CHANNELS = ("deep_red", "red", "far_red")
-NIGHT_FEED_PERCENT = 25
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
-    ents = [ScheduleSwitch(coord), NightFeedSwitch(coord)]
+    ents = [ScheduleSwitch(coord), NightFeedSwitch(coord), NightLightSwitch(coord), LightsOffSwitch(coord)]
     if (coord.data or {}).get("lunar") is not None:
         ents.append(MoonlightSwitch(coord))
     async_add_entities(ents)
@@ -37,6 +36,58 @@ class MoonlightSwitch(AquaEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_set_lunar(enable=False)
+
+
+class NightLightSwitch(AquaEntity, SwitchEntity):
+    """Overlay a low glow on the chosen channels over a night window (the lunar
+    mode then dims it by moon phase). Window/level/channels: aqua_illumination.set_night_light
+    or the card."""
+
+    _attr_name = "Night light"
+    _attr_icon = "mdi:weather-night"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "night_light")
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.night.get("enable"))
+
+    @property
+    def extra_state_attributes(self):
+        n = self.coordinator.night
+        return {k: n.get(k) for k in ("start", "end", "level", "channels")}
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_set_night(enable=True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_set_night(enable=False)
+
+
+class LightsOffSwitch(AquaEntity, SwitchEntity):
+    """Lights off until switched back on (or for a set time via aqua_illumination.lights_off);
+    the previous look and schedule come back afterwards."""
+
+    _attr_name = "Lights off"
+    _attr_icon = "mdi:lightbulb-off-outline"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "lights_off")
+
+    @property
+    def is_on(self) -> bool:
+        return (self.coordinator.override or {}).get("reason") == "lights_off"
+
+    @property
+    def extra_state_attributes(self):
+        return {"until": (self.coordinator.override or {}).get("until")}
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_override(None, None, "lights_off")
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_cancel_override()
 
 
 class ScheduleSwitch(AquaEntity, SwitchEntity):
@@ -95,8 +146,10 @@ class NightFeedSwitch(AquaEntity, SwitchEntity, RestoreEntity):
                 "colors": dict(d["colors"]),
                 "schedule_enabled": d["schedule_enabled"],
             }
-        reds = [c for c in NIGHT_FEED_CHANNELS if c in d["colors"]]
-        levels = {c: (NIGHT_FEED_PERCENT if c in reds else 0) for c in d["colors"]}
+        co = self.coordinator
+        reds = [c for c in co.night_feed_channels if c in d["colors"]] or [
+            c for c in NIGHT_FEED_CHANNELS if c in d["colors"]]
+        levels = {c: (co.night_feed_level if c in reds else 0) for c in d["colors"]}
         self._on = True
         await self.coordinator.async_set_channels(levels)
         self.async_write_ha_state()

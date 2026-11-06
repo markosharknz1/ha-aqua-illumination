@@ -26,6 +26,12 @@ v0.4.0: DHCP discovery (manifest `dhcp` MAC D89760*; config_flow `async_step_dhc
 LIVE-VERIFIED 2026-11-07 on the Prime 16 (new DHCP address): `power` shape (`normal` per-channel mW, max 40 W), stealth GET/PUT `{enable,dim,intensity(0-1000),suspend(ms)}`, preset schedule writes read back identical, restore of the original schedule, coordinator `_poll`, preset apply/save/delete, stealth set, sensors, via real coordinator code in a bare HomeAssistant object (not a running HA). Tests 17 pass.
 The light's schedule is currently the user's overnight-blue one (backup: C:/Claude/ai-prime-backup\schedule-before-v030-test.json), schedule DISABLED, all channels 0.
 
+## v0.5.0 (local commit, not pushed/released)
+Borrowed from the AIPAI project: night-light LAYER (night.py pure compose; coordinator keeps `day` layer + `night` config + `_written`, writes the composition; `_reconcile` adopts outside edits as the new day layer), overrides (`async_override`/`async_cancel_override`: lights_off + preview_levels, persisted + timer, restored after restart), preset import/export (presets.export_payload/parse_import), configurable night feeding (options level + channels), "Search my network" config flow (discovery.py), diagnostics.py, dashboard generator (dashboards/generate_dashboard.py), card: night sheet, lights-off, preview slider in editor (edits the DAY layer), export/import, visual config editor.
+Presets/select identify via the DAY layer. Store load order matters: `async_load_store()` BEFORE first refresh (a save before load wiped stored data - found+fixed live). `presets.normalize` returns lists (tuples broke equality after the JSON round trip).
+LIVE-VERIFIED (real coordinator in a bare HomeAssistant object + the Prime 16): scan finds the light, night compose write/readback identical, day layer untouched, no false external-change, preset+night, lights_off + restart rehydrate + timer restore, preview + cancel, all restored. Card behaviours tested in a real browser with a fake hass (ha-form editor only stub-tested). Tests 29 pass.
+NOT exercised anywhere: the new config-flow steps (menu/search/pick), options flow with the channel multi-select, diagnostics download, services via the HA service layer, export_presets response.
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.
