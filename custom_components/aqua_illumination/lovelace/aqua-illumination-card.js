@@ -46,7 +46,12 @@ class AquaIlluminationCard extends HTMLElement {
 
   getCardSize() { return 8; }
   static getConfigElement() { return document.createElement("aqua-illumination-card-editor"); }
-  static getStubConfig() { return { entity: "sensor.ai_prime_0000_schedule_data" }; }
+  // Start the picker on a real light when there is one (hass is passed in by the dashboard editor).
+  static getStubConfig(hass) {
+    const real = hass && Object.keys(hass.states || {}).find((id) => /^sensor\..+_schedule_data$/.test(id)
+      && hass.states[id].attributes && "day_ramps" in hass.states[id].attributes);
+    return { entity: real || "sensor.ai_prime_0000_schedule_data" };
+  }
 
   set hass(hass) {
     this._hass = hass;
