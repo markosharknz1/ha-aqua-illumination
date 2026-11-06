@@ -12,7 +12,7 @@ planned in the same repo — see [Roadmap](#roadmap).
 1. HACS → Integrations → ⋮ → Custom repositories → add this repo (category *Integration*).
 2. Install, restart Home Assistant.
 3. Settings → Devices & services → Add integration → **Aqua Illumination** → enter the light's IP.
-   Give the light a DHCP reservation so the address never changes. For linked lights use the **parent**.
+   Give the light a DHCP reservation so the address never changes (if it does change, Home Assistant's DHCP discovery spots the light by its MAC prefix and updates the saved address automatically). For linked lights use the **parent**.
 
 > HACS installs the latest **release**, not the branch — cut a release after changes.
 
@@ -27,6 +27,7 @@ planned in the same repo — see [Roadmap](#roadmap).
 | `select.<light>_schedule_preset` | built-in looks (Standard day, Coral growth, Acclimation) plus presets you saved; picking one rewrites the light's schedule |
 | `sensor.<light>_moon_phase` | moon phase + illumination % (lunar mode dims the schedule's night levels by this) |
 | `sensor.<light>_power_draw_estimated` | W, from channel levels x the light's rated per-channel wattage (only if the light reports it) |
+| `sensor.<light>_stealth` | diagnostic: the light's stealth settings (enabled, dim, intensity %, suspend s); change with `set_stealth` |
 | `sensor.<light>_temperature` | heatsink temperature (+ fan / thermal-shutdown attributes) |
 | `sensor.<light>_schedule_data` | diagnostic; carries the ramps for the card |
 | `sensor.<light>_device_clock`, `button.<light>_sync_clock`, `button.<light>_refresh` | clock tools |
@@ -49,6 +50,7 @@ Night feeding / Sync clock buttons.
 - `aqua_illumination.set_schedule` — `ramps: [{color, points: [{time: minutes, intensity: 0-1000}]}]`
   (every channel needs a ramp; times strictly increasing 0–1440)
 - `aqua_illumination.set_lunar` — `enable`, `start`, `end` (lunar window; reduces schedule levels by moon phase)
+- `aqua_illumination.set_stealth` — any of `enable`, `dim`, `intensity` (%), `suspend` (s)
 - `aqua_illumination.sync_clock`
 - `aqua_illumination.apply_preset` / `save_preset` / `delete_preset` — built-in or saved schedules (`save_preset` stores the light's current schedule)
 - `aqua_illumination.copy_schedule` — `source` light's schedule onto other lights
@@ -60,7 +62,7 @@ Events: `aqua_illumination_dropout` / `aqua_illumination_reconnected` fire when 
 All take an `entity_id` of any entity belonging to the light.
 
 ## Roadmap
-- Stealth mode (endpoint exists; reply format not yet captured on this light).
+- A card control for stealth (currently service + diagnostic sensor only; its exact behaviour on the light is untested).
 - Wavemaker (Nero) cards in this repo, modelled on the Jebao pump cards. **Not started** — the app
   drives pumps through a separate "Director/Mobius" hub API (`/api/controller`, `/api/tanks`,
   `/api/groups`), and no pump hardware has been available to capture against.

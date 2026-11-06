@@ -20,11 +20,14 @@ All modules import against HA 2025.1.4. Live: reads, channel write, schedule POS
 ## v0.2.0 (local commit, not released)
 Dropout detection: pure `dropout.py` tracker (2 failed polls = offline, one miss keeps last state), `binary_sensor.<light>_connection`, card offline banner/greyed controls/last-chart cache. Tests 12 pass; card render checked in node with stub DOM only (not a browser, not live HA).
 
-## v0.3.0 (local commit, not pushed/released)
-Dropout events + persistent notification (coordinator._announce); moon.py (moon phase sensor); presets.py + select + Store-saved presets + services apply/save/delete_preset, copy_schedule; all services take entity lists (multi-light). Power-draw sensor from `power` endpoint (`normal` per-channel mW; shape from AquaIPy test data, NOT yet seen on the owner's Prime 16). Card: schedule point editor + preset UI + moon, tested in a real browser with a fake hass (drag/add/delete/save/apply). Light was offline (unreachable) during this work: nothing in v0.3.0 verified live. Stealth NOT done (reply shape unknown). Tests 16 pass.
+## v0.3.0 (released) + v0.4.0 (local commit, not pushed/released)
+v0.3.0: dropout events + persistent notification, moon sensor, presets (select + Store + services), copy_schedule, multi-light services, power-draw sensor, card point editor + preset UI.
+v0.4.0: DHCP discovery (manifest `dhcp` MAC D89760*; config_flow `async_step_dhcp` updates the saved host for a known serial - the light DID change IP, .67 -> .50, on 2026-11-07), stealth (api.set_stealth, coordinator poll + async_set_stealth, diagnostic sensor, `set_stealth` service), preset select now identifies by comparing ramps (firmware ignores the schedule name and always reports "default").
+LIVE-VERIFIED 2026-11-07 on the Prime 16 (now 10.42.1.50): `power` shape (`normal` per-channel mW, max 40 W), stealth GET/PUT `{enable,dim,intensity(0-1000),suspend(ms)}`, preset schedule writes read back identical, restore of the original schedule, coordinator `_poll`, preset apply/save/delete, stealth set, sensors, via real coordinator code in a bare HomeAssistant object (not a running HA). Tests 17 pass.
+The light's schedule is currently the user's overnight-blue one (backup: C:\Claudei-prime-backup\schedule-before-v030-test.json), schedule DISABLED, all channels 0.
 
 ## NOT verified
-Entity layer on a running HA; card in a browser; night-feeding restore across a restart;
+Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.
 
 ## Next

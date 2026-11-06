@@ -14,6 +14,8 @@ from .moon import PHASES, moon_phase
 async def async_setup_entry(hass, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
     ents = [TempSensor(coord), ScheduleSensor(coord), ClockSensor(coord), MoonSensor(coord)]
+    if (coord.data or {}).get("stealth") is not None:
+        ents.append(StealthSensor(coord))
     if coord.power_max:
         ents.append(PowerSensor(coord))
     async_add_entities(ents)
@@ -122,3 +124,28 @@ class PowerSensor(AquaEntity, SensorEntity):
     @property
     def native_value(self):
         return self.coordinator.power_estimate_w()
+
+
+class StealthSensor(AquaEntity, SensorEntity):
+    """The light's stealth settings (change them with aqua_illumination.set_stealth)."""
+
+    _attr_name = "Stealth"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:eye-off-outline"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "stealth")
+
+    @property
+    def native_value(self):
+        st = self.coordinator.data.get("stealth") or {}
+        return "enabled" if st.get("enable") else "disabled"
+
+    @property
+    def extra_state_attributes(self):
+        st = self.coordinator.data.get("stealth") or {}
+        return {
+            "dim": st.get("dim"),
+            "intensity": None if st.get("intensity") is None else round(st["intensity"] / 10, 1),
+            "suspend_seconds": None if st.get("suspend") is None else st["suspend"] / 1000,
+        }

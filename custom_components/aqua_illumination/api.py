@@ -124,6 +124,12 @@ class AquaIlluminationClient:
         await self._request("PUT", "schedule/lunar",
                             {"enable": enable, "start": start, "end": end})
 
+    async def set_stealth(self, enable: bool, dim: bool, intensity: int, suspend: int) -> None:
+        """Stealth settings (verified live: the reply mirrors what was PUT).
+        ``intensity`` 0-1000, ``suspend`` in milliseconds."""
+        await self._request("PUT", "stealth", {
+            "enable": enable, "dim": dim, "intensity": intensity, "suspend": suspend})
+
     async def reboot(self) -> None:
         await self._request("PUT", "reboot", {})
 

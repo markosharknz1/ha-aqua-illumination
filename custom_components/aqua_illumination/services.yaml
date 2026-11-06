@@ -106,3 +106,29 @@ copy_schedule:
         entity:
           integration: aqua_illumination
           multiple: true
+set_stealth:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    enable:
+      selector:
+        boolean:
+    dim:
+      selector:
+        boolean:
+    intensity:
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    suspend:
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: s

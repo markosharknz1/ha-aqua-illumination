@@ -52,3 +52,14 @@ def test_night_glow_only_on_blue_channels():
     assert first["blue"] == 100 and first["deep_blue"] == 50 and first["uv"] == 0
     s2 = presets.build_schedule("standard", CH, False)
     assert all(r["points"][0]["intensity"] == 0 for r in s2["ramps"])
+
+
+def test_identify_ignores_name_and_finds_presets():
+    sched = presets.build_schedule("coral_growth", CH, True)
+    on_light = {**sched, "name": "default"}  # firmware keeps the name "default"
+    assert presets.identify(on_light, CH, {}) == "Coral growth"
+    assert presets.identify(presets.build_schedule("standard", CH, False), CH, {}) == "Standard day"
+    mine = {"name": "Mine", "ramps": [{"color": c, "points": [{"time": 0, "intensity": 5}, {"time": 600, "intensity": 7}]} for c in CH]}
+    assert presets.identify(mine, CH, {"Mine": mine}) == "Mine"
+    assert presets.identify(mine, CH, {}) is None
+    assert presets.identify(None, CH, {}) is None

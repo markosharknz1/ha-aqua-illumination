@@ -5,6 +5,7 @@ from homeassistant.components.select import SelectEntity
 
 from .const import DOMAIN
 from .entity import AquaEntity
+from .presets import identify
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -12,9 +13,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class PresetSelect(AquaEntity, SelectEntity):
-    """Picking an option rewrites the light's schedule. The light does not
-    report which preset is loaded, so the entity remembers the last one applied
-    here and shows it only while the schedule's name still matches."""
+    """Picking an option rewrites the light's schedule. The light keeps no
+    preset name, so the current option is found by comparing the schedule's
+    ramps with each preset; a hand-edited schedule shows as no selection."""
 
     _attr_name = "Schedule preset"
     _attr_icon = "mdi:playlist-star"
@@ -28,8 +29,8 @@ class PresetSelect(AquaEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        name = (self.coordinator.data.get("schedule") or {}).get("name")
-        return name if name in self.options else None
+        c = self.coordinator
+        return identify(c.data.get("schedule"), c.channels, c.saved_presets)
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_apply_preset(option)

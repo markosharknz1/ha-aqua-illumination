@@ -174,8 +174,13 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
             lunar = await self.client.lunar()
         except AquaIlluminationError:
             pass  # firmware without moonlight support
+        stealth = None
+        try:
+            stealth = await self.client.stealth()
+        except AquaIlluminationError:
+            pass  # firmware without stealth
         data = {
-            "colors": colors, "schedule_enabled": enabled,
+            "stealth": stealth, "colors": colors, "schedule_enabled": enabled,
             "temperature": temperature, "clock": clock,
             "schedule": self._schedule, "lunar": lunar,
         }
@@ -249,6 +254,23 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
             if not 0 <= v < 1440:
                 raise ValueError("moonlight times must be 00:00-23:59")
         await self.client.set_lunar(bool(enable), int(start), int(end))
+        await self.async_request_refresh()
+
+    async def async_set_stealth(
+        self, enable: bool | None = None, dim: bool | None = None,
+        intensity: float | None = None, suspend: float | None = None,
+    ) -> None:
+        """Change stealth settings; unspecified fields keep their value.
+        ``intensity`` is percent, ``suspend`` seconds."""
+        cur = (self.data or {}).get("stealth")
+        if cur is None:
+            raise ValueError("this light does not report stealth settings")
+        await self.client.set_stealth(
+            cur["enable"] if enable is None else bool(enable),
+            cur["dim"] if dim is None else bool(dim),
+            cur["intensity"] if intensity is None else percent_to_raw(intensity),
+            cur["suspend"] if suspend is None else int(round(suspend * 1000)),
+        )
         await self.async_request_refresh()
 
     async def async_set_schedule(self, schedule: dict) -> None:

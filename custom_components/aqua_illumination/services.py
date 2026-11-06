@@ -48,6 +48,13 @@ SET_PRESET = vol.Schema({
 })
 SAVE_PRESET = vol.Schema({**_BASE, vol.Required("name"): cv.string})
 DELETE_PRESET = SAVE_PRESET
+SET_STEALTH = vol.Schema({
+    **_BASE,
+    vol.Optional("enable"): cv.boolean,
+    vol.Optional("dim"): cv.boolean,
+    vol.Optional("intensity"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+    vol.Optional("suspend"): vol.All(vol.Coerce(float), vol.Range(min=0, max=3600)),
+})
 COPY_SCHEDULE = vol.Schema({
     vol.Required("source"): cv.entity_id,
     vol.Required("entity_id"): cv.entity_ids,
@@ -124,6 +131,11 @@ def async_register_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"source light: {err}") from err
         await _run(call, lambda c, _d: c.async_set_schedule(sched))
 
+    async def set_stealth(call: ServiceCall) -> None:
+        await _run(call, lambda c, d: c.async_set_stealth(
+            d.get("enable"), d.get("dim"), d.get("intensity"), d.get("suspend")))
+
+    hass.services.async_register(DOMAIN, "set_stealth", set_stealth, SET_STEALTH)
     hass.services.async_register(DOMAIN, "apply_preset", apply_preset, SET_PRESET)
     hass.services.async_register(DOMAIN, "save_preset", save_preset, SAVE_PRESET)
     hass.services.async_register(DOMAIN, "delete_preset", delete_preset, DELETE_PRESET)

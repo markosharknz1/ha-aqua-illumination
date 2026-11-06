@@ -64,3 +64,27 @@ def build_schedule(key: str, channels: list[str], night_glow: bool = True) -> di
             {"time": 1439, "intensity": night},
         ]})
     return {"name": label, "ramps": out}
+
+
+def normalize(schedule: dict | None) -> dict:
+    """channel -> [(minute, intensity), ...]; ignores the name, which the light
+    does not keep (it always reports "default")."""
+    return {
+        r["color"]: [(p["time"], p["intensity"]) for p in r.get("points", [])]
+        for r in (schedule or {}).get("ramps", [])
+    }
+
+
+def identify(schedule: dict | None, channels: list[str], saved: dict[str, dict]) -> str | None:
+    """Label of the preset whose ramps equal `schedule`, if any."""
+    cur = normalize(schedule)
+    if not cur:
+        return None
+    for key, (label, *_rest) in PRESETS.items():
+        for glow in (True, False):
+            if normalize(build_schedule(key, channels, glow)) == cur:
+                return label
+    for name, sched in saved.items():
+        if normalize(sched) == cur:
+            return name
+    return None

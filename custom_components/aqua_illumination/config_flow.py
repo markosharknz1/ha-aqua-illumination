@@ -49,6 +49,38 @@ class AquaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_dhcp(self, discovery_info):
+        """The light (matched by MAC prefix) appeared on the network. If it is
+        already set up under another address this just updates the host, so a
+        DHCP change never leaves the integration pointing at a dead IP."""
+        host = discovery_info.ip
+        client = AquaIlluminationClient(async_get_clientsession(self.hass), host)
+        try:
+            ident = await client.identity()
+        except AquaIlluminationError:
+            return self.async_abort(reason="cannot_connect")
+        if ident.get("parent"):
+            return self.async_abort(reason="not_parent")
+        await self.async_set_unique_id(ident["serial_number"])
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+        self._discovered = (host, ident)
+        self.context["title_placeholders"] = {"name": self._title(ident)}
+        return await self.async_step_confirm()
+
+    @staticmethod
+    def _title(ident) -> str:
+        return f"AI {ident.get('product', 'Prime')} {ident['serial_number'][-4:]}"
+
+    async def async_step_confirm(self, user_input=None):
+        host, ident = self._discovered
+        if user_input is not None:
+            return self.async_create_entry(title=self._title(ident), data={CONF_HOST: host})
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="confirm",
+            description_placeholders={"name": self._title(ident), "host": host},
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
