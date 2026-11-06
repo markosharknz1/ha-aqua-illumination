@@ -24,6 +24,9 @@ planned in the same repo — see [Roadmap](#roadmap).
 | `switch.<light>_night_feeding` | manual mode, only red at 25 %; off restores the previous look and schedule |
 | `switch.<light>_lunar_cycle`, `time.<light>_lunar_start` / `_end` | lunar mode: during the window the schedule's levels are *reduced* by moon phase (it adds no light — give the schedule a low night level for a "moon") |
 | `binary_sensor.<light>_connection` | dropout detection: on while the light answers; attributes `offline_since`, `last_seen`, `dropouts`, `last_outage_seconds`, `last_error`. Offline after 2 failed polls in a row (one miss is ignored); stays available during an outage so cards/automations can react |
+| `select.<light>_schedule_preset` | built-in looks (Standard day, Coral growth, Acclimation) plus presets you saved; picking one rewrites the light's schedule |
+| `sensor.<light>_moon_phase` | moon phase + illumination % (lunar mode dims the schedule's night levels by this) |
+| `sensor.<light>_power_draw_estimated` | W, from channel levels x the light's rated per-channel wattage (only if the light reports it) |
 | `sensor.<light>_temperature` | heatsink temperature (+ fan / thermal-shutdown attributes) |
 | `sensor.<light>_schedule_data` | diagnostic; carries the ramps for the card |
 | `sensor.<light>_device_clock`, `button.<light>_sync_clock`, `button.<light>_refresh` | clock tools |
@@ -38,7 +41,7 @@ Registered automatically. Add to a dashboard:
 type: custom:aqua-illumination-card
 entity: sensor.ai_prime_0a82_schedule_data   # your light's "Schedule data" sensor
 ```
-When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
+When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. **Edit schedule** opens a point editor: pick a channel, drag points, click empty space to add one, then Save to light. A preset picker applies/saves looks. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
 Night feeding / Sync clock buttons.
 
 ## Services
@@ -47,11 +50,17 @@ Night feeding / Sync clock buttons.
   (every channel needs a ramp; times strictly increasing 0–1440)
 - `aqua_illumination.set_lunar` — `enable`, `start`, `end` (lunar window; reduces schedule levels by moon phase)
 - `aqua_illumination.sync_clock`
+- `aqua_illumination.apply_preset` / `save_preset` / `delete_preset` — built-in or saved schedules (`save_preset` stores the light's current schedule)
+- `aqua_illumination.copy_schedule` — `source` light's schedule onto other lights
+
+Every service accepts a **list** of entities, so one call drives several lights (a failing light doesn't stop the others).
+
+Events: `aqua_illumination_dropout` / `aqua_illumination_reconnected` fire when a light drops off the network or returns (payload: serial, name, host), and a persistent notification is raised until it is back.
 
 All take an `entity_id` of any entity belonging to the light.
 
 ## Roadmap
-- Card schedule *editor* (currently read-only; edit via the `set_schedule` service).
+- Stealth mode (endpoint exists; reply format not yet captured on this light).
 - Wavemaker (Nero) cards in this repo, modelled on the Jebao pump cards. **Not started** — the app
   drives pumps through a separate "Director/Mobius" hub API (`/api/controller`, `/api/tanks`,
   `/api/groups`), and no pump hardware has been available to capture against.

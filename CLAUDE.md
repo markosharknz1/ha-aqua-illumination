@@ -20,6 +20,9 @@ All modules import against HA 2025.1.4. Live: reads, channel write, schedule POS
 ## v0.2.0 (local commit, not released)
 Dropout detection: pure `dropout.py` tracker (2 failed polls = offline, one miss keeps last state), `binary_sensor.<light>_connection`, card offline banner/greyed controls/last-chart cache. Tests 12 pass; card render checked in node with stub DOM only (not a browser, not live HA).
 
+## v0.3.0 (local commit, not pushed/released)
+Dropout events + persistent notification (coordinator._announce); moon.py (moon phase sensor); presets.py + select + Store-saved presets + services apply/save/delete_preset, copy_schedule; all services take entity lists (multi-light). Power-draw sensor from `power` endpoint (`normal` per-channel mW; shape from AquaIPy test data, NOT yet seen on the owner's Prime 16). Card: schedule point editor + preset UI + moon, tested in a real browser with a fake hass (drag/add/delete/save/apply). Light was offline (unreachable) during this work: nothing in v0.3.0 verified live. Stealth NOT done (reply shape unknown). Tests 16 pass.
+
 ## NOT verified
 Entity layer on a running HA; card in a browser; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.

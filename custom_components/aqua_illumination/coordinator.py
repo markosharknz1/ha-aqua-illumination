@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -22,6 +23,7 @@ from .const import (
     SCHEDULE_REFRESH_EVERY,
 )
 from .dropout import DropoutTracker
+from .presets import build_schedule, key_for_label
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +46,64 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         self._polls = 0
         self._schedule: dict | None = None
         self.dropout = DropoutTracker(OFFLINE_AFTER_FAILURES)
+        self._announced = False  # a dropout notification is outstanding
+        self._store = Store(hass, 1, f"{DOMAIN}.presets.{self.serial}")
+        self.saved_presets: dict[str, dict] = {}
+        self.power_max: dict[str, float] = {}  # channel -> mW at 100 %
+
+    async def async_load_extras(self) -> None:
+        """Saved presets + the light's per-channel wattage (both best effort)."""
+        stored = await self._store.async_load()
+        self.saved_presets = (stored or {}).get("presets", {})
+        try:
+            power = await self.client.power()
+        except AquaIlluminationError:
+            return
+        devs = power.get("devices") or []
+        dev = next((d for d in devs if d.get("serial_number") == self.serial), None)
+        dev = dev or (devs[0] if devs else None)
+        norm = (dev or {}).get("normal")
+        if isinstance(norm, dict):
+            self.power_max = {k: float(v) for k, v in norm.items()
+                              if isinstance(v, (int, float))}
+
+    def power_estimate_w(self) -> float | None:
+        """Estimated draw from channel levels x rated per-channel wattage."""
+        colors = (self.data or {}).get("colors")
+        if not self.power_max or not colors:
+            return None
+        mw = sum(self.power_max.get(c, 0) * min(v, 1000) / 1000 for c, v in colors.items())
+        return round(mw / 1000, 1)
+
+    @property
+    def preset_options(self) -> list[str]:
+        from .presets import builtin_names
+        return builtin_names() + sorted(self.saved_presets)
+
+    async def async_save_preset(self, name: str) -> None:
+        name = name.strip()
+        if not name or key_for_label(name):
+            raise ValueError("pick a name that is not a built-in preset")
+        sched = await self.client.schedule()
+        self.saved_presets[name] = {"name": name, "ramps": sched["ramps"]}
+        await self._store.async_save({"presets": self.saved_presets})
+        self.async_update_listeners()
+
+    async def async_delete_preset(self, name: str) -> None:
+        if self.saved_presets.pop(name, None) is None:
+            raise ValueError(f"no saved preset {name!r}")
+        await self._store.async_save({"presets": self.saved_presets})
+        self.async_update_listeners()
+
+    async def async_apply_preset(self, name: str, night_glow: bool = True) -> None:
+        key = key_for_label(name)
+        if key:
+            schedule = build_schedule(key, self.channels, night_glow)
+        elif name in self.saved_presets:
+            schedule = self.saved_presets[name]
+        else:
+            raise ValueError(f"unknown preset {name!r}")
+        await self.async_set_schedule(schedule)
 
     @property
     def channels(self) -> list[str]:
@@ -53,20 +113,50 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         try:
             data = await self._poll()
         except UpdateFailed as err:
-            if not self.dropout.failure(dt_util.utcnow(), str(err)) and self.data:
+            was_online = self.dropout.online
+            offline = self.dropout.failure(dt_util.utcnow(), str(err))
+            if not offline and self.data:
                 # A single missed poll is a blip: keep the last good state
                 # rather than flapping every entity to unavailable.
                 _LOGGER.debug("Poll failed (%s); keeping last state", err)
                 return self.data
-            if self.dropout.failures == self.dropout.threshold:
-                _LOGGER.warning("%s went offline: %s", self.name, err)
+            if was_online and offline and self.dropout.last_seen is not None:
+                # Only a light that was working counts: no alarm for a light
+                # that never answered since HA started.
+                self._announce(offline=True)
             raise
-        if self.dropout.success(dt_util.utcnow()):
+        if self.dropout.success(dt_util.utcnow()) and self._announced:
+            self._announce(offline=False)
+        return data
+
+    def _announce(self, *, offline: bool) -> None:
+        """Fire an event and raise/clear a persistent notification, so a drop is
+        actively surfaced rather than only logged. The light keeps running its
+        stored schedule; only our control and telemetry are lost."""
+        from homeassistant.components import persistent_notification
+
+        label = self.identity.get("name") or f"AI Prime {self.serial[-4:]}"
+        notif_id = f"{DOMAIN}_dropout_{self.serial}"
+        payload = {"serial": self.serial, "name": label, "host": self.client.host}
+        self._announced = offline
+        if offline:
+            _LOGGER.warning("%s went offline: %s", label, self.dropout.last_error)
+            self.hass.bus.async_fire(f"{DOMAIN}_dropout", payload)
+            persistent_notification.async_create(
+                self.hass,
+                f"{label} has dropped off the network - control and status are "
+                "lost (the light keeps running its stored schedule). Check its "
+                "power and WiFi.",
+                title="Aqua Illumination light offline",
+                notification_id=notif_id,
+            )
+        else:
             _LOGGER.info(
-                "%s is back online after %.0f s", self.name,
+                "%s is back online after %.0f s", label,
                 self.dropout.last_outage_seconds or 0,
             )
-        return data
+            self.hass.bus.async_fire(f"{DOMAIN}_reconnected", payload)
+            persistent_notification.async_dismiss(self.hass, notif_id)
 
     async def _poll(self) -> dict:
         try:

@@ -17,7 +17,7 @@ from .const import (
 )
 from .coordinator import AquaCoordinator
 
-PLATFORMS = ["number", "switch", "sensor", "binary_sensor", "button", "time"]
+PLATFORMS = ["number", "switch", "sensor", "binary_sensor", "button", "time", "select"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -33,6 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.options.get(CONF_AUTO_CLOCK, DEFAULT_AUTO_CLOCK),
     )
     await coordinator.async_config_entry_first_refresh()
+    await coordinator.async_load_extras()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))

@@ -5,6 +5,7 @@ set_channels:
       selector:
         entity:
           integration: aqua_illumination
+          multiple: true
     levels:
       required: true
       example: '{"blue": 40, "deep_blue": 60}'
@@ -17,6 +18,7 @@ set_schedule:
       selector:
         entity:
           integration: aqua_illumination
+          multiple: true
     ramps:
       required: true
       example: '[{"color": "blue", "points": [{"time": 0, "intensity": 0}, {"time": 480, "intensity": 600}, {"time": 1200, "intensity": 0}]}]'
@@ -32,6 +34,7 @@ sync_clock:
       selector:
         entity:
           integration: aqua_illumination
+          multiple: true
 set_lunar:
   fields:
     entity_id:
@@ -39,6 +42,7 @@ set_lunar:
       selector:
         entity:
           integration: aqua_illumination
+          multiple: true
     enable:
       selector:
         boolean:
@@ -48,3 +52,57 @@ set_lunar:
     end:
       selector:
         time:
+apply_preset:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    preset:
+      required: true
+      example: Coral growth
+      selector:
+        text:
+    night_glow:
+      default: true
+      selector:
+        boolean:
+save_preset:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    name:
+      required: true
+      selector:
+        text:
+delete_preset:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true
+    name:
+      required: true
+      selector:
+        text:
+copy_schedule:
+  fields:
+    source:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: aqua_illumination
+          multiple: true

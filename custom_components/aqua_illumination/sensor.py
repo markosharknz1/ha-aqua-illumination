@@ -5,12 +5,18 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.const import EntityCategory, UnitOfTemperature
 
 from .const import DOMAIN
+from homeassistant.util import dt as dt_util
+
 from .entity import AquaEntity
+from .moon import PHASES, moon_phase
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([TempSensor(coord), ScheduleSensor(coord), ClockSensor(coord)])
+    ents = [TempSensor(coord), ScheduleSensor(coord), ClockSensor(coord), MoonSensor(coord)]
+    if coord.power_max:
+        ents.append(PowerSensor(coord))
+    async_add_entities(ents)
 
 
 class TempSensor(AquaEntity, SensorEntity):
@@ -73,3 +79,46 @@ class ClockSensor(AquaEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return {"location": self.coordinator.data["clock"].get("location")}
+
+
+class MoonSensor(AquaEntity, SensorEntity):
+    """Moon phase from the date. Lunar mode dims the schedule's night levels by
+    this phase, so it explains how bright a "moonlit" night will be."""
+
+    _attr_name = "Moon phase"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = PHASES
+    _attr_icon = "mdi:moon-waning-crescent"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "moon_phase")
+
+    @property
+    def native_value(self):
+        return moon_phase(dt_util.utcnow())["name"]
+
+    @property
+    def extra_state_attributes(self):
+        m = moon_phase(dt_util.utcnow())
+        lunar = self.coordinator.data.get("lunar") or {}
+        return {
+            "illumination": m["illumination"], "age_days": m["age_days"],
+            "lunar_enabled": lunar.get("enable"),
+            "lunar_start": lunar.get("start"), "lunar_end": lunar.get("end"),
+        }
+
+
+class PowerSensor(AquaEntity, SensorEntity):
+    """Estimated draw: channel levels x the light's rated per-channel wattage."""
+
+    _attr_name = "Power draw (estimated)"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = "W"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "power_estimate")
+
+    @property
+    def native_value(self):
+        return self.coordinator.power_estimate_w()
