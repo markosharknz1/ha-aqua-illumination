@@ -6,7 +6,7 @@
  *
  * Every other entity is derived from the sensor's name, so one line is enough.
  */
-const CARD_VERSION = "0.6.0";
+const CARD_VERSION = "0.6.1";
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
 const COLORS = {
@@ -187,7 +187,7 @@ class AquaIlluminationCard extends HTMLElement {
           <button class="chip" data-dz="del" ${edge ? "disabled" : ""}>Delete point</button></div>
         <div class="sliders">${dz.colors.map((c) => `<label class="row">
           <span class="dot" style="background:${COLORS[c] || "#888"}"></span><span class="lbl">${LABEL(c)}</span>
-          <input type="range" min="0" max="100" step="0.5" value="${sel.ch[c] / 10}" data-dzch="${c}" style="accent-color:${COLORS[c] || "#888"}">
+          <input type="range" min="0" max="100" step="0.5" value="${sel.ch[c] / 10}" data-dzch="${c}" style="--c:${COLORS[c] || "#888"};--p:${sel.ch[c] / 10}%">
           <span class="val">${sel.ch[c] / 10}%</span></label>`).join("")}</div>`
         : `<div class="foot">Select a point to set all channels at that time.</div>`}
       <div class="toggles">
@@ -216,6 +216,7 @@ class AquaIlluminationCard extends HTMLElement {
       inp.oninput = () => {
         sel.ch[inp.dataset.dzch] = Math.round(Number(inp.value) * 10);
         val.textContent = `${inp.value}%`;
+        inp.style.setProperty("--p", `${inp.value}%`);
         this._drawDesigner();
         this._dzPreview();
       };
@@ -610,7 +611,7 @@ class AquaIlluminationCard extends HTMLElement {
     return `<label class="row">
       <span class="dot" style="background:${colour}"></span>
       <span class="lbl">${LABEL(c.key)}</span>
-      <input type="range" min="0" max="100" step="0.5" value="${v}" data-id="${c.id}" ${gone ? "disabled" : ""} style="accent-color:${colour}">
+      <input type="range" min="0" max="100" step="0.5" value="${v}" data-id="${c.id}" ${gone ? "disabled" : ""} style="--c:${colour};--p:${v}%">
       <span class="val">${gone ? "—" : v + "%"}</span>
     </label>`;
   }
@@ -651,7 +652,7 @@ class AquaIlluminationCard extends HTMLElement {
     });
     this._card.querySelectorAll("input[type=range]").forEach((inp) => {
       const val = inp.parentElement.querySelector(".val");
-      inp.oninput = () => { this._dragging = true; val.textContent = `${inp.value}%`; };
+      inp.oninput = () => { this._dragging = true; val.textContent = `${inp.value}%`; inp.style.setProperty("--p", `${inp.value}%`); };
       inp.onchange = () => {
         call("number", "set_value", { entity_id: inp.dataset.id, value: Number(inp.value) });
         this._dragging = false;
@@ -682,7 +683,14 @@ AquaIlluminationCard.css = `
   .row{display:grid;grid-template-columns:12px 92px 1fr 48px;align-items:center;gap:8px}
   .dot{width:10px;height:10px;border-radius:50%}
   .val{text-align:right;font-variant-numeric:tabular-nums}
-  input[type=range]{width:100%}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;outline:none;margin:6px 0;
+    background:linear-gradient(to right,var(--c,var(--primary-color,#888)) var(--p,0%),var(--divider-color,#8885) var(--p,0%))}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;cursor:pointer;
+    background:var(--c,var(--primary-color,#888));border:2px solid var(--card-background-color,#fff);box-shadow:0 0 3px #0007}
+  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;cursor:pointer;
+    background:var(--c,var(--primary-color,#888));border:2px solid var(--card-background-color,#fff);box-shadow:0 0 3px #0007}
+  input[type=range]::-moz-range-track{background:transparent}
+  input[type=range]:disabled{opacity:.4}
   .foot{margin-top:8px;font-size:.8em;opacity:.6}
 `;
 
