@@ -35,6 +35,9 @@ NOT exercised anywhere: the new config-flow steps (menu/search/pick), options fl
 ## v0.6.0 card (local commit)
 Card point designer modelled on the AIPAI card: time points, each with a time + a level per channel (sliders), drag-to-retime, add/delete, Copy to all, live preview via preview_levels, Save/Cancel; per-channel curve editor kept as "Per-channel curves". ramps<->points conversion is lossless (tested). Browser-tested with a fake hass. Both editors edit the DAY layer.
 
+## v0.6.0 (local commit, not pushed/released) - card 0.7.0
+Card locked by default (Edit/Done button, auto-relock after idle, `always_unlocked`, `lock_seconds`), slider tracks drawn by the card (accent-color blackened Cool White/Green), stub config picks a real light. BUG FIXED: the "Night feeding" chip and "Night light..." button shared data-act="night" so each fired both actions (shipped in v0.5.0/v0.5.1) - now "feed" vs "night". Found only by real mouse clicks; the earlier JS-click tests had hit the wrong element.
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.

@@ -5,8 +5,14 @@
  *   name: Reef            # optional
  *
  * Every other entity is derived from the sensor's name, so one line is enough.
+ *
+ * The card is view-only until "Edit" is pressed, so a stray tap can't change the
+ * light; it locks again after a couple of idle minutes. Options:
+ *   always_unlocked: true     # no lock, controls always live
+ *   lock_seconds: 120         # idle time before it relocks
  */
-const CARD_VERSION = "0.6.1";
+const CARD_VERSION = "0.7.0";
+const LOCK_AFTER_SECONDS = 120;  // idle time before the card locks itself again
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
 const COLORS = {
@@ -41,10 +47,28 @@ class AquaIlluminationCard extends HTMLElement {
       this._root = this.attachShadow({ mode: "open" });
       this._root.innerHTML = `<style>${AquaIlluminationCard.css}</style><ha-card></ha-card>`;
       this._card = this._root.querySelector("ha-card");
+      ["pointerdown", "keydown", "input"].forEach((t) => this._card.addEventListener(t, () => this._touch(), true));
     }
   }
 
   getCardSize() { return 8; }
+
+  _isLocked() { return this._config.always_unlocked !== true && !this._unlocked; }
+
+  // Any touch while unlocked restarts the idle clock; when it runs out the card
+  // relocks (never while an editor is open - that would throw away a draft).
+  _touch() {
+    clearTimeout(this._lockTimer);
+    if (!this._unlocked) return;
+    const ms = (Number(this._config.lock_seconds) || LOCK_AFTER_SECONDS) * 1000;
+    this._lockTimer = setTimeout(() => {
+      if (this._edit || this._dz || this._sheet || this._dragging) { this._touch(); return; }
+      this._unlocked = false;
+      this._render();
+    }, ms);
+  }
+
+  disconnectedCallback() { clearTimeout(this._lockTimer); }
   static getConfigElement() { return document.createElement("aqua-illumination-card-editor"); }
   // Start the picker on a real light when there is one (hass is passed in by the dashboard editor).
   static getStubConfig(hass) {
@@ -96,6 +120,9 @@ class AquaIlluminationCard extends HTMLElement {
     const schedSw = this._e("switch", "schedule");
     const nightSw = this._e("switch", "night_feeding");
     const chans = this._channels();
+    const locked = this._isLocked(), lk = locked ? " locked" : "", inertA = locked ? " inert" : "";
+    const lockBtn = this._config.always_unlocked === true ? ""
+      : `<button class="chip lockbtn ${this._unlocked ? "on" : ""}" data-act="lock">${this._unlocked ? "Done" : "Edit"}</button>`;
     const moon = this._e("sensor", "moon_phase");
     const presetSel = this._e("select", "schedule_preset");
 
@@ -111,29 +138,29 @@ class AquaIlluminationCard extends HTMLElement {
       <div class="pad">
         <div class="head">
           <div class="title">${title}</div>
-          <div class="meta">${moon && moon.state !== "unavailable" ? `🌙 ${LABEL(moon.state)} ${moon.attributes.illumination}%  ` : ""}${temp && temp.state !== "unavailable" ? temp.state + " °C" : ""}</div>
+          <div class="meta">${moon && moon.state !== "unavailable" ? `🌙 ${LABEL(moon.state)} ${moon.attributes.illumination}%  ` : ""}${temp && temp.state !== "unavailable" ? temp.state + " °C" : ""} ${lockBtn}</div>
         </div>
         ${offline ? `<div class="warn">⚠ Light offline${ca.offline_since ? " for " + this._ago(ca.offline_since) : ""} — check its power and WiFi${ca.dropouts ? ` · ${ca.dropouts} dropout${ca.dropouts > 1 ? "s" : ""} this session` : ""}</div>` : ""}
-        <div class="toggles ${offline ? "off" : ""}">
+        <div class="toggles ${offline ? "off" : ""}${lk}"${inertA}>
           <button class="chip ${schedSw && schedSw.state === "on" ? "on" : ""}" data-act="schedule">Schedule ${schedSw ? schedSw.state : "?"}</button>
-          <button class="chip ${nightSw && nightSw.state === "on" ? "on" : ""}" data-act="night">Night feeding</button>
+          <button class="chip ${nightSw && nightSw.state === "on" ? "on" : ""}" data-act="feed">Night feeding</button>
           <button class="chip" data-act="clock">Sync clock</button>
         </div>
         <div class="${offline ? "off" : ""}">${this._chart(ramps, nowMin)}</div>
-        <div class="presets ${offline ? "off" : ""}">
+        <div class="presets ${offline ? "off" : ""}${lk}"${inertA}>
           ${presetSel ? `<select data-preset>${(presetSel.attributes.options || []).map((o) =>
             `<option ${o === presetSel.state ? "selected" : ""}>${o}</option>`).join("")}</select>
             <button class="chip" data-act="apply">Apply</button>` : ""}
           <button class="chip" data-act="edit">Edit schedule</button>
           <button class="chip" data-act="save">Save as preset…</button>
         </div>
-        <div class="presets ${offline ? "off" : ""}">
+        <div class="presets ${offline ? "off" : ""}${lk}"${inertA}>
           <button class="chip ${night.enable ? "on" : ""}" data-act="night">Night light${night.enable ? " on" : ""}</button>
           ${lightsOff ? `<button class="chip ${lightsOff.state === "on" ? "on" : ""}" data-act="off">${lightsOff.state === "on" ? "Resume" : "Lights off…"}</button>` : ""}
           <button class="chip" data-act="export">Export presets</button>
           <button class="chip" data-act="import">Import…</button>
         </div>
-        <div class="sliders ${offline ? "off" : ""}">
+        <div class="sliders ${offline ? "off" : ""}${lk}"${inertA}>
           ${chans.map((c) => this._slider(c)).join("")}
         </div>
         <div class="foot">${offline
@@ -621,8 +648,9 @@ class AquaIlluminationCard extends HTMLElement {
     this._card.querySelectorAll("[data-act]").forEach((b) => {
       b.onclick = () => {
         const a = b.dataset.act;
+        if (a === "lock") { this._unlocked = !this._unlocked; this._touch(); this._render(); return; }
         if (a === "schedule") call("switch", "toggle", { entity_id: `switch.${this._prefix}_schedule` });
-        if (a === "night") call("switch", "toggle", { entity_id: `switch.${this._prefix}_night_feeding` });
+        if (a === "feed") call("switch", "toggle", { entity_id: `switch.${this._prefix}_night_feeding` });
         if (a === "clock") call("button", "press", { entity_id: `button.${this._prefix}_sync_clock` });
         if (a === "apply") {
           const sel = this._card.querySelector("[data-preset]");
@@ -668,6 +696,9 @@ AquaIlluminationCard.css = `
   .meta{opacity:.7}
   .warn{color:var(--error-color,#c33);margin:6px 0}
   .off{opacity:.4;pointer-events:none}
+  .locked{opacity:.7;pointer-events:none}
+  .lockbtn{margin-left:6px;padding:2px 12px}
+  .meta{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:2px 6px}
   .presets{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0 0}
   .presets select{background:var(--card-background-color);color:inherit;border:1px solid var(--divider-color,#888);border-radius:8px;padding:4px 6px;font:inherit}
   .chip[disabled]{opacity:.4;cursor:default}
@@ -701,10 +732,11 @@ class AquaIlluminationCardEditor extends HTMLElement {
     if (!this._hass || !this._config) return;
     if (!this._form) {
       this._form = document.createElement("ha-form");
-      this._form.computeLabel = (sch) => ({ entity: "Light (its 'Schedule data' sensor)", name: "Name (optional)" }[sch.name] || sch.name);
+      this._form.computeLabel = (sch) => ({ entity: "Light (its 'Schedule data' sensor)", name: "Name (optional)", always_unlocked: "Always allow changes (no Edit lock)" }[sch.name] || sch.name);
       this._form.addEventListener("value-changed", (ev) => {
         const cfg = Object.assign({}, this._config, ev.detail.value);
         if (!cfg.name) delete cfg.name;
+        if (!cfg.always_unlocked) delete cfg.always_unlocked;
         this._config = cfg;
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: cfg }, bubbles: true, composed: true }));
       });
@@ -714,6 +746,7 @@ class AquaIlluminationCardEditor extends HTMLElement {
     this._form.schema = [
       { name: "entity", required: true, selector: { entity: { domain: "sensor", integration: "aqua_illumination" } } },
       { name: "name", selector: { text: {} } },
+      { name: "always_unlocked", selector: { boolean: {} } },
     ];
     this._form.data = this._config;
   }

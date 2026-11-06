@@ -39,6 +39,7 @@ schedule overwrites your change within a minute. Turn the Schedule switch back o
 The integration also keeps the light's clock right automatically (option).
 
 ## Card
+The card is **view-only until you press Edit** (top right), so a stray tap can't change the light. It relocks after 2 idle minutes (never while an editor is open) or when you press **Done**. Options: `always_unlocked: true` removes the lock; `lock_seconds: 300` changes the idle time.
 Registered automatically. Add to a dashboard:
 ```yaml
 type: custom:aqua-illumination-card
