@@ -24,7 +24,7 @@ Dropout detection: pure `dropout.py` tracker (2 failed polls = offline, one miss
 v0.3.0: dropout events + persistent notification, moon sensor, presets (select + Store + services), copy_schedule, multi-light services, power-draw sensor, card point editor + preset UI.
 v0.4.0: DHCP discovery (manifest `dhcp` MAC D89760*; config_flow `async_step_dhcp` updates the saved host for a known serial - the light DID change IP, .67 -> .50, on 2026-11-07), stealth (api.set_stealth, coordinator poll + async_set_stealth, diagnostic sensor, `set_stealth` service), preset select now identifies by comparing ramps (firmware ignores the schedule name and always reports "default").
 LIVE-VERIFIED 2026-11-07 on the Prime 16 (new DHCP address): `power` shape (`normal` per-channel mW, max 40 W), stealth GET/PUT `{enable,dim,intensity(0-1000),suspend(ms)}`, preset schedule writes read back identical, restore of the original schedule, coordinator `_poll`, preset apply/save/delete, stealth set, sensors, via real coordinator code in a bare HomeAssistant object (not a running HA). Tests 17 pass.
-The light's schedule is currently the user's overnight-blue one (backup: C:\Claudei-prime-backup\schedule-before-v030-test.json), schedule DISABLED, all channels 0.
+The light's schedule is currently the user's overnight-blue one (backup: C:/Claude/ai-prime-backup\schedule-before-v030-test.json), schedule DISABLED, all channels 0.
 
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
