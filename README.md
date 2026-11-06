@@ -44,7 +44,7 @@ Registered automatically. Add to a dashboard:
 type: custom:aqua-illumination-card
 entity: sensor.ai_prime_0a82_schedule_data   # your light's "Schedule data" sensor
 ```
-When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. **Edit schedule** opens a point editor: pick a channel, drag points, click empty space to add one, then Save to light. A preset picker applies/saves looks, with **Export presets** / **Import…** to share them, **Night light…** for the glow layer, **Lights off…** for a timed hold, and a **Preview on light** slider in the editor that shows the draft on the real light before you save. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
+When the light drops off the network the card shows an "offline for …" warning, greys out the controls, keeps the last schedule chart and reports dropout count/duration. **Edit schedule** opens the point designer: tap a time marker, set every channel's level with its sliders, drag the marker sideways (or type a time) to retime it, tap empty space to add a point, **Copy to all**, then **Save to light** or **Cancel**. With live preview on, the selected point shows on the real light. *Per-channel curves* switches to a per-channel point editor. A preset picker applies/saves looks, with **Export presets** / **Import…** to share them, **Night light…** for the glow layer, **Lights off…** for a timed hold, and a **Preview on light** slider in the editor that shows the draft on the real light before you save. Shows the 24 h schedule with a "now" marker, live sliders per channel, and Schedule /
 Night feeding / Sync clock buttons.
 
 ## Setup, options, dashboard

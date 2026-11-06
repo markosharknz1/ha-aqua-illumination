@@ -32,6 +32,9 @@ Presets/select identify via the DAY layer. Store load order matters: `async_load
 LIVE-VERIFIED (real coordinator in a bare HomeAssistant object + the Prime 16): scan finds the light, night compose write/readback identical, day layer untouched, no false external-change, preset+night, lights_off + restart rehydrate + timer restore, preview + cancel, all restored. Card behaviours tested in a real browser with a fake hass (ha-form editor only stub-tested). Tests 29 pass.
 NOT exercised anywhere: the new config-flow steps (menu/search/pick), options flow with the channel multi-select, diagnostics download, services via the HA service layer, export_presets response.
 
+## v0.6.0 card (local commit)
+Card point designer modelled on the AIPAI card: time points, each with a time + a level per channel (sliders), drag-to-retime, add/delete, Copy to all, live preview via preview_levels, Save/Cancel; per-channel curve editor kept as "Per-channel curves". ramps<->points conversion is lossless (tested). Browser-tested with a fake hass. Both editors edit the DAY layer.
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.

@@ -6,7 +6,7 @@
  *
  * Every other entity is derived from the sensor's name, so one line is enough.
  */
-const CARD_VERSION = "0.5.0";
+const CARD_VERSION = "0.6.0";
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
 const COLORS = {
@@ -52,7 +52,7 @@ class AquaIlluminationCard extends HTMLElement {
     this._hass = hass;
     // Don't rebuild while the user is dragging a slider.
     // ...or while the schedule editor is open (it draws itself).
-    if (this._dragging || this._edit || this._sheet) return;
+    if (this._dragging || this._edit || this._sheet || this._dz) return;
     this._render();
   }
 
@@ -138,6 +138,192 @@ class AquaIlluminationCard extends HTMLElement {
     this._wire();
   }
 
+  // ---- point designer: every channel at each time point --------------------
+  // The schedule is a list of time points; each point has a time and a level for
+  // every channel, and the light fades between points. Selecting or editing a
+  // point previews it on the light; nothing is kept until "Save to light"
+  // (Cancel puts the light back).
+  _pointsFromRamps(ramps, name) {
+    const colors = ramps.map((r) => r.color);
+    const times = new Set([0, 1439]);
+    ramps.forEach((r) => r.points.forEach((p) => times.add(Math.min(p.time, 1439))));
+    const pts = [...times].sort((a, b) => a - b).map((t) => ({
+      time: t, ch: Object.fromEntries(ramps.map((r) => [r.color, Math.round(valueAt(r.points, t))])),
+    }));
+    return { colors, pts, sel: null, live: true, name: name || "default" };
+  }
+
+  _rampsFromPoints(dz) {
+    return dz.colors.map((c) => ({ color: c, points: dz.pts.map((p) => ({ time: p.time, intensity: p.ch[c] })) }));
+  }
+
+  _startDesigner() {
+    const ramps = this._lastDay || this._lastRamps || [];
+    if (!ramps.length) { alert("No schedule loaded yet."); return; }
+    const sched = this._hass.states[this._config.entity];
+    this._dz = this._pointsFromRamps(ramps, sched && sched.state);
+    this._renderDesigner();
+  }
+
+  _renderDesigner() {
+    const dz = this._dz, sel = dz.sel === null ? null : dz.pts[dz.sel];
+    const edge = sel && (dz.sel === 0 || dz.sel === dz.pts.length - 1);
+    this._card.innerHTML = `<div class="pad">
+      <div class="head"><div class="title">Schedule designer</div><div class="meta">${dz.name}</div></div>
+      <svg viewBox="0 0 360 170" class="chart edit" data-dzchart></svg>
+      <div class="presets">
+        <button class="chip ${dz.live ? "on" : ""}" data-dz="live">Live preview ${dz.live ? "on" : "off"}</button>
+        ${this._prevActive ? `<button class="chip" data-dz="endprev">End preview</button>` : ""}
+        <span class="foot" style="margin:0">Tap a marker to edit it · drag it sideways to retime · tap empty space to add a point</span>
+      </div>
+      ${sel ? `<div class="presets"><span>Point at</span>
+          <input type="time" data-dztime value="${hhmm(sel.time)}" ${edge ? "disabled" : ""}>
+          <button class="chip" data-dz="copy" title="Give every other point these levels">Copy to all</button>
+          <button class="chip" data-dz="del" ${edge ? "disabled" : ""}>Delete point</button></div>
+        <div class="sliders">${dz.colors.map((c) => `<label class="row">
+          <span class="dot" style="background:${COLORS[c] || "#888"}"></span><span class="lbl">${LABEL(c)}</span>
+          <input type="range" min="0" max="100" step="0.5" value="${sel.ch[c] / 10}" data-dzch="${c}" style="accent-color:${COLORS[c] || "#888"}">
+          <span class="val">${sel.ch[c] / 10}%</span></label>`).join("")}</div>`
+        : `<div class="foot">Select a point to set all channels at that time.</div>`}
+      <div class="toggles">
+        <button class="chip on" data-dz="save">Save to light</button>
+        <button class="chip" data-dz="cancel">Cancel</button>
+        <button class="chip" data-dz="curves">Per-channel curves</button>
+      </div></div>`;
+    this._drawDesigner();
+    const q = (x) => this._card.querySelector(x);
+    this._card.querySelectorAll("[data-dz]").forEach((b) => {
+      b.onclick = () => this._dzAction(b.dataset.dz);
+    });
+    const ti = q("[data-dztime]");
+    if (ti) {
+      ti.onchange = () => {
+        if (!ti.value) return;
+        const [h, m] = ti.value.split(":").map(Number);
+        const lo = dz.pts[dz.sel - 1].time + 1, hi = dz.pts[dz.sel + 1].time - 1;
+        sel.time = Math.max(lo, Math.min(hi, h * 60 + m));
+        ti.value = hhmm(sel.time);
+        this._drawDesigner();
+      };
+    }
+    this._card.querySelectorAll("[data-dzch]").forEach((inp) => {
+      const val = inp.parentElement.querySelector(".val");
+      inp.oninput = () => {
+        sel.ch[inp.dataset.dzch] = Math.round(Number(inp.value) * 10);
+        val.textContent = `${inp.value}%`;
+        this._drawDesigner();
+        this._dzPreview();
+      };
+    });
+    this._wireDesignerChart();
+  }
+
+  _drawDesigner() {
+    const dz = this._dz, W = 360, H = 170, TOP = 22, PLOT = H - TOP - 14;
+    const x = (t) => 8 + (t / 1440) * (W - 16), y = (i) => TOP + PLOT - (Math.min(i, 1000) / 1000) * PLOT;
+    let g = "";
+    for (let h = 0; h <= 24; h += 3) {
+      g += `<line x1="${x(h * 60)}" x2="${x(h * 60)}" y1="${TOP}" y2="${TOP + PLOT}" class="grid"/><text x="${x(h * 60) + 2}" y="${H - 3}" class="tick">${String(h).padStart(2, "0")}</text>`;
+    }
+    for (const c of dz.colors) {
+      const d = dz.pts.map((p, n) => `${n ? "L" : "M"}${x(p.time).toFixed(1)},${y(p.ch[c]).toFixed(1)}`).join(" ");
+      g += `<path d="${d}" fill="none" stroke="${COLORS[c] || "#888"}" stroke-width="1.8" opacity="0.9"/>`;
+    }
+    dz.pts.forEach((p, n) => {
+      const on = n === dz.sel;
+      g += `<line x1="${x(p.time)}" x2="${x(p.time)}" y1="${TOP}" y2="${TOP + PLOT}" stroke="var(--primary-color)" stroke-width="${on ? 1.5 : 0.7}" stroke-dasharray="3 2" opacity="${on ? 1 : 0.4}"/>`
+        + `<circle cx="${x(p.time)}" cy="11" r="${on ? 7 : 5.5}" fill="${on ? "var(--primary-color)" : "var(--card-background-color,#fff)"}" stroke="var(--primary-color)" stroke-width="2"/>`;
+    });
+    this._card.querySelector("[data-dzchart]").innerHTML = g;
+  }
+
+  _wireDesignerChart() {
+    const svg = this._card.querySelector("[data-dzchart]"), dz = this._dz, W = 360;
+    const tAt = (ev) => {
+      const b = svg.getBoundingClientRect(), k = b.width / W;
+      return { t: (((ev.clientX - b.left) / k - 8) / (W - 16)) * 1440, k };
+    };
+    let drag = null;
+    svg.onpointerdown = (ev) => {
+      const { t, k } = tAt(ev);
+      let best = -1, bd = 1e9;
+      dz.pts.forEach((p, n) => { const d = Math.abs(((p.time - t) / 1440) * (W - 16) * k); if (d < bd) { bd = d; best = n; } });
+      if (bd > 12) {  // empty space: add a point here with the levels the curve already has
+        const tt = Math.max(1, Math.min(1438, Math.round(t / 5) * 5));
+        if (dz.pts.some((p) => p.time === tt)) return;
+        const ch = Object.fromEntries(dz.colors.map((c) => [c, Math.round(valueAt(dz.pts.map((p) => ({ time: p.time, intensity: p.ch[c] })), tt))]));
+        dz.pts.push({ time: tt, ch });
+        dz.pts.sort((a, b) => a.time - b.time);
+        best = dz.pts.findIndex((p) => p.time === tt);
+      }
+      dz.sel = best; drag = best;
+      svg.setPointerCapture(ev.pointerId);
+      this._drawDesigner();
+    };
+    svg.onpointermove = (ev) => {
+      if (drag === null || drag === 0 || drag === dz.pts.length - 1) return;
+      const { t } = tAt(ev), p = dz.pts[drag];
+      const nt = Math.max(dz.pts[drag - 1].time + 1, Math.min(dz.pts[drag + 1].time - 1, Math.round(t / 5) * 5));
+      if (nt !== p.time) { p.time = nt; this._drawDesigner(); }
+    };
+    const end = () => { if (drag !== null) { drag = null; this._renderDesigner(); this._dzPreview(); } };
+    svg.onpointerup = end;
+    svg.onpointercancel = end;
+  }
+
+  _dzPreview() {
+    const dz = this._dz;
+    if (!dz || !dz.live || dz.sel === null) return;
+    clearTimeout(this._dzTimer);
+    this._dzTimer = setTimeout(async () => {
+      const p = dz.pts[dz.sel];
+      if (!p) return;
+      const levels = Object.fromEntries(dz.colors.map((c) => [c, p.ch[c] / 10]));
+      try {
+        await this._hass.callService("aqua_illumination", "preview_levels", { entity_id: this._config.entity, levels, duration: 10 });
+        if (!this._prevActive) { this._prevActive = true; if (this._dz) this._renderDesigner(); }
+      } catch (err) { dz.live = false; alert(`Preview failed: ${err.message || err}`); this._renderDesigner(); }
+    }, 350);
+  }
+
+  async _dzAction(a) {
+    const dz = this._dz;
+    if (a === "live") {
+      dz.live = !dz.live;
+      if (!dz.live) await this._endPreview(); else this._dzPreview();
+      this._renderDesigner();
+    }
+    if (a === "endprev") { await this._endPreview(); this._renderDesigner(); }
+    if (a === "copy" && dz.sel !== null) {
+      const src = dz.pts[dz.sel].ch;
+      dz.pts.forEach((p) => { p.ch = { ...src }; });
+      this._renderDesigner();
+    }
+    if (a === "del" && dz.sel !== null && dz.sel > 0 && dz.sel < dz.pts.length - 1) {
+      dz.pts.splice(dz.sel, 1); dz.sel = null; this._renderDesigner();
+    }
+    if (a === "cancel") { clearTimeout(this._dzTimer); await this._endPreview(); this._dz = null; this._render(); }
+    if (a === "curves") {
+      clearTimeout(this._dzTimer);
+      const ramps = this._rampsFromPoints(dz);
+      this._dz = null;
+      this._edit = { ramps, sel: ramps[0].color, pt: null, name: dz.name };
+      this._renderEdit();
+    }
+    if (a === "save") {
+      clearTimeout(this._dzTimer);
+      if (dz.pts.length < 2) { alert("Need at least 2 points."); return; }
+      const ramps = this._rampsFromPoints(dz);
+      try {
+        await this._hass.callService("aqua_illumination", "set_schedule", { entity_id: this._config.entity, name: dz.name, ramps });
+      } catch (err) { alert(`Could not save: ${err.message || err}`); return; }
+      this._lastDay = ramps;
+      await this._endPreview();
+      this._dz = null;
+      this._render();
+    }
+  }
+
   // ---- schedule editor ------------------------------------------------
   _startEdit() {
     const ramps = (this._lastDay || this._lastRamps || []).map((r) => ({
@@ -163,11 +349,12 @@ class AquaIlluminationCard extends HTMLElement {
         <span>Preview on light at</span>
         <input type="range" min="0" max="1439" step="5" value="${e.prevAt ?? 720}" data-prev style="flex:1">
         <span data-prevt>${hhmm(e.prevAt ?? 720)}</span>
-        ${e.previewing ? `<button class="chip on" data-edit="endprev">End preview</button>` : ""}
+        ${this._prevActive ? `<button class="chip on" data-edit="endprev">End preview</button>` : ""}
       </div>
       <div class="foot" data-pt>${e.pt !== null ? this._pointText() : "Drag a point · click empty space to add one"}</div>
       <div class="toggles">
         <button class="chip" data-edit="del" ${canDel ? "" : "disabled"}>Delete point</button>
+        <button class="chip" data-edit="designer">Point designer</button>
         <button class="chip on" data-edit="save">Save to light</button>
         <button class="chip" data-edit="cancel">Cancel</button>
       </div></div>`;
@@ -182,6 +369,11 @@ class AquaIlluminationCard extends HTMLElement {
         if (a === "del" && canDel) { r.points.splice(e.pt, 1); e.pt = null; this._renderEdit(); }
         if (a === "save") this._saveEdit();
         if (a === "endprev") this._endPreview().then(() => this._renderEdit());
+        if (a === "designer") {
+          this._dz = this._pointsFromRamps(e.ramps, e.name);
+          this._edit = null;
+          this._renderDesigner();
+        }
       };
     });
     const pv = this._card.querySelector("[data-prev]");
@@ -194,7 +386,7 @@ class AquaIlluminationCard extends HTMLElement {
         try {
           await this._hass.callService("aqua_illumination", "preview_levels", {
             entity_id: this._config.entity, levels, duration: 10 });
-          if (!e.previewing) { e.previewing = true; this._renderEdit(); }
+          if (!this._prevActive) { this._prevActive = true; this._renderEdit(); }
         } catch (err) { alert(`Preview failed: ${err.message || err}`); }
       };
     }
@@ -289,9 +481,8 @@ class AquaIlluminationCard extends HTMLElement {
   }
 
   async _endPreview() {
-    const e = this._edit;
-    if (!e || !e.previewing) return;
-    e.previewing = false;
+    if (!this._prevActive) return;
+    this._prevActive = false;
     try { await this._hass.callService("aqua_illumination", "cancel_lights_off", { entity_id: this._config.entity }); }
     catch (err) { alert(`Could not end the preview: ${err.message || err}`); }
   }
@@ -439,7 +630,7 @@ class AquaIlluminationCard extends HTMLElement {
           if (BUILTIN_PRESETS.includes(name)) { alert("That name is a built-in preset."); return; }
           call("aqua_illumination", "save_preset", { entity_id: this._config.entity, name });
         }
-        if (a === "edit") this._startEdit();
+        if (a === "edit") this._startDesigner();
         if (a === "night") this._startNight();
         if (a === "off") {
           const sw = this._e("switch", "lights_off");
