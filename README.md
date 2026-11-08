@@ -23,6 +23,7 @@ planned in the same repo — see [Roadmap](#roadmap).
 | `switch.<light>_schedule` | the light's own schedule on/off |
 | `switch.<light>_night_feeding` | manual mode, only red at 25 %; off restores the previous look and schedule |
 | `switch.<light>_night_light` | a low glow on chosen channels over a night window, laid over the schedule (window/level/channels: `set_night_light` or the card). The schedule you edit stays separate, so editing it never loses the glow |
+| `switch.<light>_all_lights` | **All lights on / off** for automations such as Feed and Water: off = every channel off; on = back to exactly what the light was doing (levels + schedule). Add it to Feed and Water's *Channel(s) to turn off while feeding* |
 | `switch.<light>_lights_off` | lights off until switched back on, or for a set time (`lights_off` service); the previous look and schedule come back, even across a restart |
 | `switch.<light>_lunar_cycle`, `time.<light>_lunar_start` / `_end` | lunar mode: during the window the schedule's levels are *reduced* by moon phase (it adds no light — give the schedule a low night level for a "moon") |
 | `binary_sensor.<light>_connection` | dropout detection: on while the light answers; attributes `offline_since`, `last_seen`, `dropouts`, `last_outage_seconds`, `last_error`. Offline after 2 failed polls in a row (one miss is ignored); stays available during an outage so cards/automations can react |

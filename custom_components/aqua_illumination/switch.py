@@ -12,7 +12,7 @@ NIGHT_FEED_CHANNELS = ("deep_red", "red", "far_red")
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
-    ents = [ScheduleSwitch(coord), NightFeedSwitch(coord), NightLightSwitch(coord), LightsOffSwitch(coord)]
+    ents = [ScheduleSwitch(coord), NightFeedSwitch(coord), NightLightSwitch(coord), LightsOffSwitch(coord), AllLightsSwitch(coord)]
     if (coord.data or {}).get("lunar") is not None:
         ents.append(MoonlightSwitch(coord))
     async_add_entities(ents)
@@ -63,6 +63,33 @@ class NightLightSwitch(AquaEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_set_night(enable=False)
+
+
+class AllLightsSwitch(AquaEntity, SwitchEntity):
+    """All lights on / all lights off, the way automations (e.g. Feed and Water) expect.
+
+    Off = every channel off until switched back on. On = the light goes back to
+    exactly what it was doing (previous levels and schedule), so a feed routine
+    that turns it off and later turns it on again restores the light rather than
+    forcing it to full power. Same hold as "Lights off", with on meaning "lit"."""
+
+    _attr_name = "All lights"
+    _attr_icon = "mdi:lightbulb-group"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "all_lights")
+
+    @property
+    def is_on(self) -> bool:
+        return (self.coordinator.override or {}).get("reason") != "lights_off"
+
+    async def async_turn_off(self, **kwargs) -> None:
+        if self.is_on:
+            await self.coordinator.async_override(None, None, "lights_off")
+
+    async def async_turn_on(self, **kwargs) -> None:
+        if not self.is_on:
+            await self.coordinator.async_cancel_override()
 
 
 class LightsOffSwitch(AquaEntity, SwitchEntity):

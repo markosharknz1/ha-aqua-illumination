@@ -38,6 +38,9 @@ Card point designer modelled on the AIPAI card: time points, each with a time + 
 ## v0.6.0 (local commit, not pushed/released) - card 0.7.0
 Card locked by default (Edit/Done button, auto-relock after idle, `always_unlocked`, `lock_seconds`), slider tracks drawn by the card (accent-color blackened Cool White/Green), stub config picks a real light. BUG FIXED: the "Night feeding" chip and "Night light..." button shared data-act="night" so each fired both actions (shipped in v0.5.0/v0.5.1) - now "feed" vs "night". Found only by real mouse clicks; the earlier JS-click tests had hit the wrong element.
 
+## v0.6.1 (local commit, not released)
+`switch.<light>_all_lights` (AllLightsSwitch): on = lit/no hold, off = "lights_off" override; turn_on releases the hold and restores the previous look. Chosen so Feed and Water's snapshot/restore (switch channel: dim -> turn_off, restore -> turn_on) returns the light to its schedule instead of forcing full power. Live-verified on the Prime 16 incl. a night-red write while held, then restore.
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.
