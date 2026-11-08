@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.png" width="128" alt="Aqua Illumination for Home Assistant"></p>
+
 # Aqua Illumination for Home Assistant
 
 Local, cloud-free control of **Aqua Illumination Prime** lights (verified on a
