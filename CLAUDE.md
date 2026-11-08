@@ -44,6 +44,9 @@ Card locked by default (Edit/Done button, auto-relock after idle, `always_unlock
 ## v0.6.2 (local commit, not released)
 Icon: original artwork (reef light with 7 channel LEDs over coral, no vendor logo/text). Source `assets/icon.svg`; PNGs `assets/icon.png` + in-integration `custom_components/aqua_illumination/brand/icon.png` (256) and `icon@2x.png` (512) - HA 2026.3+ serves local brand images from the integration's brand folder - nothing else is needed (do NOT suggest a home-assistant/brands PR; the user has said that route is obsolete). Regenerate: Edge headless `--screenshot` of the SVG with `--default-background-color=00000000 --window-size=512,512`, then Pillow LANCZOS to 256.
 
+## v0.7.0 (released) - version alignment
+No code change from v0.6.2; integration version bumped to 0.7.0 to match card 0.7.0 (the user expected a "7" release). Card and integration versions are otherwise independent.
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.
