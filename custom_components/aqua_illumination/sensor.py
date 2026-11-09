@@ -67,6 +67,7 @@ class ScheduleSensor(AquaEntity, SensorEntity):
             "ramps": s.get("ramps", []),          # what the light is running (incl. night glow)
             "day_ramps": day.get("ramps", []),    # what the editor edits
             "night": c.night,
+            "moon": c.moon_info,   # follow-the-moon: tonight's window, phase, effective level
             "saved_presets": c.saved_presets,
             "host": c.client.host,
         }

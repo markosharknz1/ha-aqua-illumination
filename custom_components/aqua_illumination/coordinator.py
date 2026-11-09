@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -24,7 +24,8 @@ from .const import (
     SCHEDULE_REFRESH_EVERY,
 )
 from .dropout import DropoutTracker
-from .night import clean_night, compose, default_night
+from .moon import moon_phase, night_glow_window
+from .night import clean_night, compose, default_night, effective_night
 from .presets import build_schedule, key_for_label, normalize
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +62,9 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         # A temporary manual hold (lights off / preview); the previous look is restored after.
         self.override: dict | None = None
         self._override_unsub = None
+        self._moon_window: dict | None = None  # tonight's glow window (follow the moon)
+        self.moon_info: dict = {}
+        self._moon_unsub = None
         self.night_feed_level: float = 25.0
         self.night_feed_channels: list[str] = []
 
@@ -84,6 +88,12 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
             self.night = default_night(self.channels)
         if self.override:
             self._arm_override()
+        self._moon_unsub = async_track_time_change(self.hass, self._moon_tick, hour=12, minute=0, second=0)
+        if self.night.get("follow_moon"):
+            try:
+                await self.async_refresh_moon()
+            except AquaIlluminationError as err:
+                _LOGGER.warning("%s: follow-the-moon update failed (%s)", self.name, err)
         try:
             power = await self.client.power()
         except AquaIlluminationError:
@@ -166,7 +176,7 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         self.async_update_listeners()
         return len(new)
 
-    async def async_apply_preset(self, name: str, night_glow: bool = True) -> None:
+    async def async_apply_preset(self, name: str, night_glow: bool = False) -> None:
         key = key_for_label(name)
         if key:
             schedule = build_schedule(key, self.channels, night_glow)
@@ -356,7 +366,7 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
         day = self.day or validate_schedule(
             (self.data or {}).get("schedule") or await self.client.schedule(), self.channels)
         self.day = day
-        composed = validate_schedule(compose(day, self.night), self.channels)
+        composed = validate_schedule(compose(day, self._effective_night()), self.channels)
         await self.client.set_schedule(composed)
         self._written = normalize(composed)
         await self._async_save()
@@ -365,11 +375,97 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
 
     async def async_set_night(self, **changes) -> None:
         """Change the night-light layer; unspecified fields keep their value."""
+        was_follow = bool(self.night.get("follow_moon"))
         self.night = clean_night(
             {**self.night, **{k: v for k, v in changes.items() if v is not None}},
             self.channels,
         )
+        now_follow = bool(self.night["follow_moon"])
+        if now_follow and not was_follow:
+            await self._moon_takes_over_lunar()
+        elif was_follow and not now_follow:
+            await self._moon_releases_lunar()
+        self._compute_moon()
         await self._write_composed()
+
+    # -- follow the moon ------------------------------------------------
+    def _effective_night(self) -> dict:
+        return effective_night(self.night, self._moon_window)
+
+    def _compute_moon(self) -> None:
+        """Work out tonight's glow window (moon up inside the night hours) and the
+        info the card shows. Pure maths; no I/O."""
+        n = self.night
+        if not n.get("follow_moon"):
+            self._moon_window, self.moon_info = None, {}
+            return
+        zone = self._zone((self.data or {}).get("clock") or {})
+        now = dt_util.utcnow().astimezone(zone)
+        length = (int(n["end"]) - int(n["start"])) % 1440
+        if length == 0:
+            self._moon_window, self.moon_info = None, {"follow": True}
+            return
+        today_start = now.replace(hour=int(n["start"]) // 60, minute=int(n["start"]) % 60,
+                                  second=0, microsecond=0)
+        prev_start = today_start - timedelta(days=1)
+        # A night still in progress counts as "tonight"; otherwise the coming one.
+        start_dt = prev_start if now < prev_start + timedelta(minutes=length) else today_start
+        found = night_glow_window(
+            start_dt, length / 60, self.hass.config.latitude, self.hass.config.longitude)
+        if found is None:
+            self._moon_window = None
+            mid = moon_phase(start_dt + timedelta(minutes=length / 2))
+            self.moon_info = {
+                "follow": True, "phase": mid["name"], "illumination": mid["illumination"],
+                "window": None, "level_effective": 0,
+            }
+            return
+        def minute(dt, up):
+            dt = dt.astimezone(zone)
+            m = dt.hour * 60 + dt.minute + (1 if up and dt.second >= 30 else 0)
+            return m % 1440
+        s_m, e_m = minute(found["start"], True), minute(found["end"], False)
+        if s_m == e_m:
+            self._moon_window = None
+            self.moon_info = {"follow": True, "window": None, "level_effective": 0}
+            return
+        self._moon_window = {"start": s_m, "end": e_m, "illumination": found["illumination"]}
+        eff = effective_night(n, self._moon_window)
+        self.moon_info = {
+            "follow": True, "phase": moon_phase(found["start"])["name"],
+            "illumination": found["illumination"], "window": [s_m, e_m],
+            "level_effective": eff["level"], "night_start": start_dt.isoformat(),
+        }
+
+    async def async_refresh_moon(self) -> None:
+        """Recompute tonight's window and rewrite the schedule only if it changed."""
+        self._compute_moon()
+        if not self.night.get("follow_moon") or self.day is None:
+            return
+        composed = validate_schedule(compose(self.day, self._effective_night()), self.channels)
+        if normalize(composed) != self._written:
+            await self._write_composed()
+        else:
+            self.async_update_listeners()
+
+    async def _moon_tick(self, _now) -> None:
+        try:
+            await self.async_refresh_moon()
+        except (AquaIlluminationError, ValueError) as err:
+            _LOGGER.warning("%s: follow-the-moon update failed (%s)", self.name, err)
+
+    async def _moon_takes_over_lunar(self) -> None:
+        """We scale the glow by the moon's phase ourselves, so the light's own lunar
+        mode would dim it a second time. Switch it off (remembering) while following."""
+        lunar = (self.data or {}).get("lunar")
+        if lunar and lunar.get("enable"):
+            await self.client.set_lunar(False, int(lunar["start"]), int(lunar["end"]))
+            self.night["lunar_restore"] = True
+
+    async def _moon_releases_lunar(self) -> None:
+        if self.night.pop("lunar_restore", False):
+            lunar = (self.data or {}).get("lunar") or {"start": 1200, "end": 240}
+            await self.client.set_lunar(True, int(lunar["start"]), int(lunar["end"]))
 
     # -- temporary overrides (lights off / preview) --------------------
     async def async_override(
@@ -431,4 +527,7 @@ class AquaCoordinator(DataUpdateCoordinator[dict]):
 
     async def async_shutdown(self) -> None:
         self._cancel_override_timer()
+        if self._moon_unsub:
+            self._moon_unsub()
+            self._moon_unsub = None
         await super().async_shutdown()

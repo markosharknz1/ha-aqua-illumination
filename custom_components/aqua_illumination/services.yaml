@@ -66,7 +66,7 @@ apply_preset:
       selector:
         text:
     night_glow:
-      default: true
+      default: false
       selector:
         boolean:
 save_preset:
@@ -159,6 +159,15 @@ set_night_light:
       example: '["blue", "deep_blue"]'
       selector:
         object:
+    follow_moon:
+      selector:
+        boolean:
+    moon_min:
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
 lights_off:
   fields:
     entity_id:

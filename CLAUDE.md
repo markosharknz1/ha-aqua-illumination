@@ -47,6 +47,9 @@ Icon: original artwork (reef light with 7 channel LEDs over coral, no vendor log
 ## v0.7.0 (released) - version alignment
 No code change from v0.6.2; integration version bumped to 0.7.0 to match card 0.7.0 (the user expected a "7" release). Card and integration versions are otherwise independent.
 
+## v0.8.0 (local commit, not released) - card 0.8.0
+Follow the moon: night config gains `follow_moon` + `moon_min`; moon.py now computes moonrise/moonset (low-precision lunar position, validated vs USNO api: rise/set within ~8 min, illumination within ~5 %) and `night_glow_window` (moon-up span inside the night hours); night.effective_night confines the glow to it and scales level by max(moon_min, illumination). Coordinator: `_compute_moon`/`async_refresh_moon`, daily tick at 12:00 local, takes over the light's lunar mode (turns it off, `lunar_restore` flag, restored when follow is turned off). Card Night light sheet: Follow the moon + info + minimum slider. Built-in presets now default night_glow False (the night layer is the proper glow). Live-verified on the Prime 16 (compose write/readback, lunar hand-over and restore, no-op refresh) and browser-tested with a fake hass. Tests 38 pass. Our scaling replaces the firmware's; the firmware's exact lunar scaling formula is unknown (app text only: Waxing Crescent turns 7 % blue into 1.4 %).
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.

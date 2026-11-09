@@ -11,7 +11,7 @@
  *   always_unlocked: true     # no lock, controls always live
  *   lock_seconds: 120         # idle time before it relocks
  */
-const CARD_VERSION = "0.7.0";
+const CARD_VERSION = "0.8.0";
 const LOCK_AFTER_SECONDS = 120;  // idle time before the card locks itself again
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
@@ -527,6 +527,7 @@ class AquaIlluminationCard extends HTMLElement {
     this._sheet = {
       enable: !!n.enable, start: n.start ?? 1200, end: n.end ?? 420,
       level: n.level ?? 5, channels: [...(n.channels || [])],
+      follow: !!n.follow_moon, moonMin: n.moon_min ?? 10,
     };
     this._renderNight();
   }
@@ -536,16 +537,22 @@ class AquaIlluminationCard extends HTMLElement {
     const chans = this._channels().map((c) => c.key);
     this._card.innerHTML = `<div class="pad">
       <div class="head"><div class="title">Night light</div></div>
-      <div class="foot">A low glow on the channels you pick, laid over the schedule between these times. Lunar mode then dims it by moon phase.</div>
+      <div class="foot">A low glow on the channels you pick, laid over the schedule at night.</div>
       <div class="presets"><label><input type="checkbox" data-n="enable" ${n.enable ? "checked" : ""}> Enabled</label></div>
-      <div class="presets"><span>From</span><input type="time" data-n="start" value="${hhmm(n.start)}">
+      <div class="presets"><label><input type="checkbox" data-n="follow" ${n.follow ? "checked" : ""}> Follow the moon</label></div>
+      ${n.follow ? this._moonInfo() : ""}
+      <div class="presets"><span>${n.follow ? "Night hours" : "From"}</span><input type="time" data-n="start" value="${hhmm(n.start)}">
         <span>to</span><input type="time" data-n="end" value="${hhmm(n.end)}"></div>
-      <div class="presets"><span>Level</span><input type="range" min="0" max="30" step="0.5" value="${n.level}" data-n="level" style="flex:1"><span data-lv>${n.level}%</span></div>
+      <div class="presets"><span>${n.follow ? "Level at full moon" : "Level"}</span><input type="range" min="0" max="30" step="0.5" value="${n.level}" data-n="level" style="flex:1"><span data-lv>${n.level}%</span></div>
+      ${n.follow ? `<div class="presets"><span>Never below</span><input type="range" min="0" max="50" step="1" value="${n.moonMin}" data-n="moonmin" style="flex:1"><span data-mm>${n.moonMin}% of that</span></div>` : ""}
       <div class="toggles">${chans.map((c) => `<button class="chip ${n.channels.includes(c) ? "on" : ""}" data-ch="${c}">${LABEL(c)}</button>`).join("")}</div>
       <div class="toggles"><button class="chip on" data-nsave>Save</button><button class="chip" data-ncancel>Cancel</button></div></div>`;
     const q = (sel) => this._card.querySelector(sel);
     const mins = (v) => { const [h, m] = v.split(":").map(Number); return h * 60 + m; };
     q('[data-n=enable]').onchange = (ev) => { n.enable = ev.target.checked; };
+    q('[data-n=follow]').onchange = (ev) => { n.follow = ev.target.checked; this._renderNight(); };
+    const mm = q('[data-n=moonmin]');
+    if (mm) mm.oninput = (ev) => { n.moonMin = Number(ev.target.value); q("[data-mm]").textContent = `${n.moonMin}% of that`; };
     q('[data-n=start]').onchange = (ev) => { if (ev.target.value) n.start = mins(ev.target.value); };
     q('[data-n=end]').onchange = (ev) => { if (ev.target.value) n.end = mins(ev.target.value); };
     q('[data-n=level]').oninput = (ev) => { n.level = Number(ev.target.value); q("[data-lv]").textContent = `${n.level}%`; };
@@ -563,10 +570,22 @@ class AquaIlluminationCard extends HTMLElement {
       try {
         await this._hass.callService("aqua_illumination", "set_night_light", {
           entity_id: this._config.entity, enable: n.enable, start: t(n.start), end: t(n.end),
-          level: n.level, channels: n.channels });
+          level: n.level, channels: n.channels, follow_moon: n.follow, moon_min: n.moonMin });
       } catch (err) { alert(`Could not save: ${err.message || err}`); return; }
       this._sheet = null; this._render();
     };
+  }
+
+  // What "follow the moon" will do tonight, from the integration's own calculation.
+  _moonInfo() {
+    const sched = this._hass.states[this._config.entity];
+    const m = (sched && sched.attributes.moon) || {};
+    const nice = (k) => (k ? LABEL(k) : "");
+    let line;
+    if (!m.follow) line = "Save to see tonight's moon.";
+    else if (!m.window) line = `${nice(m.phase)} ${m.illumination ?? ""}% lit - the moon isn't up during your night hours, so no glow tonight.`;
+    else line = `${nice(m.phase)} ${m.illumination}% lit · moon up ${hhmm(m.window[0])}-${hhmm(m.window[1])} · glow about ${m.level_effective}%`;
+    return `<div class="foot" style="margin:2px 0 6px">🌙 ${line}<br>The glow runs only while the moon is up inside your night hours, dimmer near a new moon. The light's own Lunar cycle is switched off while this is on (it would dim twice) and restored afterwards.</div>`;
   }
 
   // ---- preset import / export -------------------------------------------

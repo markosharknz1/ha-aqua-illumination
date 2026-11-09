@@ -146,3 +146,97 @@ def test_normalize_survives_json_roundtrip():
     import json
     n = presets.normalize(presets.build_schedule("standard", CH, True))
     assert json.loads(json.dumps(n)) == n
+
+
+# ---- moonrise / moonset ------------------------------------------------------
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
+ADL = ZoneInfo("Australia/Adelaide")
+LAT, LON = -34.93, 138.60
+
+
+def _local(y, m, d, hh=0, mm=0):
+    return datetime(y, m, d, hh, mm, tzinfo=ADL)
+
+
+def test_full_moon_is_up_most_of_the_night():
+    w = moon.night_glow_window(_local(2025, 2, 12, 20), 11, LAT, LON)   # 20:00 -> 07:00
+    assert w is not None
+    assert _local(2025, 2, 12, 19, 30) <= w["start"] <= _local(2025, 2, 12, 21, 30)   # rises near sunset
+    assert _local(2025, 2, 13, 5, 0) <= w["end"] <= _local(2025, 2, 13, 7, 30)        # sets near sunrise
+    assert w["illumination"] >= 95
+
+
+def test_new_moon_is_down_in_the_middle_of_the_night():
+    assert moon.night_glow_window(_local(2025, 1, 30, 22), 8, LAT, LON) is None       # 22:00 -> 06:00
+    w = moon.night_glow_window(_local(2025, 1, 30, 20), 11, LAT, LON)                 # but up briefly at dusk
+    assert w is not None and (w["end"] - w["start"]) < timedelta(hours=2)
+    assert w["illumination"] <= 5
+
+
+def test_window_stays_inside_the_night():
+    for day in range(1, 29):
+        s = _local(2025, 2, day, 20)
+        w = moon.night_glow_window(s, 11, LAT, LON)
+        if w:
+            assert s <= w["start"] < w["end"] <= s + timedelta(hours=11)
+
+
+def test_moonrise_advances_roughly_50_minutes_a_day():
+    def rise(day):
+        spans = moon.moon_up_intervals(_local(2025, 2, day), _local(2025, 2, day) + timedelta(hours=24), LAT, LON)
+        return [a for a, _ in spans if a.hour or a.minute][0]
+    gaps = [((rise(d + 1) - rise(d)).total_seconds() / 60) % 1440 for d in range(6, 12)]
+    assert all(30 <= g <= 75 for g in gaps), gaps
+
+
+def test_northern_hemisphere_also_works():
+    # London, full moon 2025-02-12: up through the winter night
+    w = moon.night_glow_window(datetime(2025, 2, 12, 18, tzinfo=ZoneInfo("Europe/London")), 12, 51.5, -0.1)
+    assert w is not None and (w["end"] - w["start"]) > timedelta(hours=8)
+
+
+# ---- follow the moon: effective night layer ------------------------------------
+def _base_night(**kw):
+    n = night.default_night(["blue", "uv"])
+    n.update(enable=True, level=10.0, **kw)
+    return n
+
+
+def test_effective_night_unchanged_without_follow():
+    n = _base_night()
+    assert night.effective_night(n, {"start": 1, "end": 2, "illumination": 50}) is n
+
+
+def test_effective_night_confines_window_and_scales_by_phase():
+    n = _base_night(follow_moon=True, moon_min=10.0)
+    e = night.effective_night(n, {"start": 1224, "end": 367, "illumination": 62})
+    assert (e["start"], e["end"]) == (1224, 367)
+    assert abs(e["level"] - 6.2) < 1e-9 and e["enable"] is True
+    # a thin crescent never drops below the floor
+    e2 = night.effective_night(n, {"start": 1224, "end": 367, "illumination": 3})
+    assert abs(e2["level"] - 1.0) < 1e-9
+    # nothing rises tonight -> no glow at all
+    assert night.effective_night(n, None)["enable"] is False
+    assert night.effective_night({**n, "enable": False}, {"start": 1, "end": 2, "illumination": 90})["enable"] is False
+
+
+def test_follow_moon_composes_a_valid_schedule():
+    day = _day()
+    n = _base_night(follow_moon=True, channels=["blue"])
+    e = night.effective_night(n, {"start": 1224, "end": 367, "illumination": 62})
+    out = night.compose(day, e)
+    api.validate_schedule(out, ["blue", "uv"])
+    assert abs(_val(out, "blue", 1300) - 62) < 1 and _val(out, "blue", 200) == 62   # 6.2 % of 1000 = 62
+    assert _val(out, "blue", 600) == _val(day, "blue", 600)
+
+
+def test_clean_night_validates_moon_fields():
+    ch = ["blue", "uv"]
+    assert night.clean_night({"follow_moon": True, "moon_min": 20}, ch)["moon_min"] == 20.0
+    try:
+        night.clean_night({"moon_min": 150}, ch)
+    except ValueError:
+        return
+    raise AssertionError("moon_min 150 accepted")

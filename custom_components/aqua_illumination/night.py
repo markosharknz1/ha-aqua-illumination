@@ -19,6 +19,8 @@ def default_night(channels: list[str]) -> dict[str, Any]:
     return {
         "enable": False, "start": 1200, "end": 420, "level": 5.0,
         "channels": blues or channels[:1],
+        # Follow the real moon: glow only while it is up, scaled by its phase.
+        "follow_moon": False, "moon_min": 10.0,
     }
 
 
@@ -33,6 +35,10 @@ def clean_night(night: dict[str, Any], channels: list[str]) -> dict[str, Any]:
     out["level"] = float(out["level"])
     if not 0 <= out["level"] <= 100:
         raise ValueError("night light level must be 0-100 %")
+    out["follow_moon"] = bool(out["follow_moon"])
+    out["moon_min"] = float(out["moon_min"])
+    if not 0 <= out["moon_min"] <= 100:
+        raise ValueError("moon minimum must be 0-100 %")
     chans = list(out["channels"])
     bad = [c for c in chans if c not in channels]
     if bad:
@@ -100,3 +106,22 @@ def compose(day: dict[str, Any], night: dict[str, Any]) -> dict[str, Any]:
         else:
             ramps.append(r)
     return {"name": day.get("name", "default"), "ramps": ramps}
+
+
+def effective_night(night: dict[str, Any], window: dict | None) -> dict[str, Any]:
+    """The night layer actually written to the light.
+
+    Without "follow the moon" this is the configured night layer. With it, the
+    glow is confined to the part of the night the moon is up (``window`` =
+    ``{"start": minute, "end": minute, "illumination": %}``, or ``None`` if it
+    never rises in the night) and its level is scaled by how lit the moon is,
+    never below ``moon_min`` % of the full-moon level."""
+    if not night.get("follow_moon"):
+        return night
+    if not night.get("enable") or not window:
+        return {**night, "enable": False}
+    factor = max(night["moon_min"] / 100.0, window["illumination"] / 100.0)
+    return {
+        **night, "start": window["start"], "end": window["end"],
+        "level": round(night["level"] * factor, 2),
+    }

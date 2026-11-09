@@ -44,7 +44,7 @@ SET_LUNAR = vol.Schema({
 SET_PRESET = vol.Schema({
     **_BASE,
     vol.Required("preset"): cv.string,
-    vol.Optional("night_glow", default=True): cv.boolean,
+    vol.Optional("night_glow", default=False): cv.boolean,
 })
 SAVE_PRESET = vol.Schema({**_BASE, vol.Required("name"): cv.string})
 DELETE_PRESET = SAVE_PRESET
@@ -62,6 +62,8 @@ SET_NIGHT = vol.Schema({
     vol.Optional("end"): cv.time,
     vol.Optional("level"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
     vol.Optional("channels"): vol.All(cv.ensure_list, [cv.string]),
+    vol.Optional("follow_moon"): cv.boolean,
+    vol.Optional("moon_min"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
 })
 LIGHTS_OFF = vol.Schema({
     **_BASE,
@@ -163,7 +165,8 @@ def async_register_services(hass: HomeAssistant) -> None:
             return None if t is None else t.hour * 60 + t.minute
         await _run(call, lambda c, d: c.async_set_night(
             enable=d.get("enable"), start=mins(d.get("start")), end=mins(d.get("end")),
-            level=d.get("level"), channels=d.get("channels")))
+            level=d.get("level"), channels=d.get("channels"),
+            follow_moon=d.get("follow_moon"), moon_min=d.get("moon_min")))
 
     async def lights_off(call: ServiceCall) -> None:
         await _run(call, lambda c, d: c.async_override(None, d.get("duration"), "lights_off"))

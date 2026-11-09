@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 CARD_URL = "/aqua_illumination/aqua-illumination-card.js"
-CARD_VERSION = "0.7.0"  # bump whenever the card JS changes (browser cache)
+CARD_VERSION = "0.8.0"  # bump whenever the card JS changes (browser cache)
 _KEY = "aqua_illumination_card_registered"
 
 
