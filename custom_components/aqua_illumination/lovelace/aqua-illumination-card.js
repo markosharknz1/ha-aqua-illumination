@@ -11,7 +11,7 @@
  *   always_unlocked: true     # no lock, controls always live
  *   lock_seconds: 120         # idle time before it relocks
  */
-const CARD_VERSION = "0.8.0";
+const CARD_VERSION = "0.8.1";
 const LOCK_AFTER_SECONDS = 120;  // idle time before the card locks itself again
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
@@ -140,6 +140,9 @@ class AquaIlluminationCard extends HTMLElement {
           <div class="title">${title}</div>
           <div class="meta">${moon && moon.state !== "unavailable" ? `🌙 ${LABEL(moon.state)} ${moon.attributes.illumination}%  ` : ""}${temp && temp.state !== "unavailable" ? temp.state + " °C" : ""} ${lockBtn}</div>
         </div>
+        ${!offline && schedSw && schedSw.state === "off" && !(lightsOff && lightsOff.state === "on") && !this._prevActive
+          ? `<div class="warn schedoff">⚠ Schedule is OFF - the light is not following its schedule.
+              <span${inertA}><button class="chip on" data-act="schedon">Turn on</button></span>${locked ? ` <span class="foot">(press Edit first)</span>` : ""}</div>` : ""}
         ${offline ? `<div class="warn">⚠ Light offline${ca.offline_since ? " for " + this._ago(ca.offline_since) : ""} — check its power and WiFi${ca.dropouts ? ` · ${ca.dropouts} dropout${ca.dropouts > 1 ? "s" : ""} this session` : ""}</div>` : ""}
         <div class="toggles ${offline ? "off" : ""}${lk}"${inertA}>
           <button class="chip ${schedSw && schedSw.state === "on" ? "on" : ""}" data-act="schedule">Schedule ${schedSw ? schedSw.state : "?"}</button>
@@ -189,7 +192,25 @@ class AquaIlluminationCard extends HTMLElement {
     return dz.colors.map((c) => ({ color: c, points: dz.pts.map((p) => ({ time: p.time, intensity: p.ch[c] })) }));
   }
 
+  // A saved schedule only plays if the schedule switch is on. A preview switches it off
+  // temporarily, so remember what it was when the editor opened and offer to turn it on.
+  _schedIsOn() {
+    const sw = this._e("switch", "schedule");
+    return !!sw && sw.state === "on";
+  }
+
+  async _offerSchedule(wasOn) {
+    if (wasOn) return;
+    const sw = this._e("switch", "schedule");
+    if (!sw) return;
+    if (confirm("The schedule is switched off, so the light won't follow what you just saved.\n\nTurn the schedule on now?")) {
+      try { await this._hass.callService("switch", "turn_on", { entity_id: sw.entity_id || `switch.${this._prefix}_schedule` }); }
+      catch (err) { alert(`Could not turn the schedule on: ${err.message || err}`); }
+    }
+  }
+
   _startDesigner() {
+    this._schedWasOn = this._schedIsOn();
     const ramps = this._lastDay || this._lastRamps || [];
     if (!ramps.length) { alert("No schedule loaded yet."); return; }
     const sched = this._hass.states[this._config.entity];
@@ -354,11 +375,13 @@ class AquaIlluminationCard extends HTMLElement {
       await this._endPreview();
       this._dz = null;
       this._render();
+      await this._offerSchedule(this._schedWasOn);
     }
   }
 
   // ---- schedule editor ------------------------------------------------
   _startEdit() {
+    this._schedWasOn = this._schedIsOn();
     const ramps = (this._lastDay || this._lastRamps || []).map((r) => ({
       color: r.color, points: (r.points || []).map((p) => ({ time: p.time, intensity: p.intensity })),
     }));
@@ -511,6 +534,7 @@ class AquaIlluminationCard extends HTMLElement {
     await this._endPreview();
     this._edit = null;
     this._render();
+    await this._offerSchedule(this._schedWasOn);
   }
 
   async _endPreview() {
@@ -669,12 +693,14 @@ class AquaIlluminationCard extends HTMLElement {
         const a = b.dataset.act;
         if (a === "lock") { this._unlocked = !this._unlocked; this._touch(); this._render(); return; }
         if (a === "schedule") call("switch", "toggle", { entity_id: `switch.${this._prefix}_schedule` });
+        if (a === "schedon") call("switch", "turn_on", { entity_id: `switch.${this._prefix}_schedule` });
         if (a === "feed") call("switch", "toggle", { entity_id: `switch.${this._prefix}_night_feeding` });
         if (a === "clock") call("button", "press", { entity_id: `button.${this._prefix}_sync_clock` });
         if (a === "apply") {
           const sel = this._card.querySelector("[data-preset]");
           if (sel && confirm(`Replace the light's schedule with "${sel.value}"?`)) {
             call("select", "select_option", { entity_id: `select.${this._prefix}_schedule_preset`, option: sel.value });
+            this._offerSchedule(this._schedIsOn());
           }
         }
         if (a === "save") {
