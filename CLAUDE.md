@@ -53,6 +53,9 @@ Follow the moon: night config gains `follow_moon` + `moon_min`; moon.py now comp
 ## v0.8.1 (local commit, not released) - card 0.8.1
 Card: red "Schedule is OFF" banner + Turn on (inert while locked, hidden when lights are held off / preview running / offline); after Save to light (designer or per-channel) or Apply preset, if the schedule switch was off when the editor opened, confirm() offers to turn it on (state is snapshotted at editor open because a preview temporarily switches it off). Prompted by the user's light not following its saved schedule: the schedule had been left disabled after the earlier "switch the light off" request + test restores (light live-checked 2026-11-10: enabled False, colors 0, clock/schedule fine, reachable at the DHCP address). Browser-tested.
 
+## v0.8.2 (local commit, not released)
+Card + services are now registered by `async_setup` and at the very start of `async_setup_entry` (before contacting the light). Before this, an unreachable light (ConfigEntryNotReady retry loop) meant the card JS was never served -> every dashboard showed "Custom element doesn't exist: aqua-illumination-card" (user hit it 2026-11-19: HA got OSError 113 "no route to host" to the light while the user's PC could ping/reach it). Card now treats an `unavailable` Connection sensor as offline (banner + disabled controls). Not unit-testable without a running HA (hass.http); node-stub render of an all-unavailable card checked.
+
 ## NOT verified
 Entity layer on a running HA (platform setup, registry, dhcp step); card against real HA; night-feeding restore across a restart;
 `power`-endpoint HD overdrive (>100 %) not exposed.

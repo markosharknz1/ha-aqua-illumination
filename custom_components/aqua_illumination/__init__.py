@@ -4,6 +4,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import AquaIlluminationClient, AquaIlluminationError
@@ -22,8 +23,27 @@ from .coordinator import AquaCoordinator
 
 PLATFORMS = ["number", "switch", "sensor", "binary_sensor", "button", "time", "select"]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve the card and register the services. Idempotent, and done before any light
+    is contacted: a light that is briefly unreachable must not make the card vanish
+    from every dashboard (it should show that light as offline instead)."""
+    from .panel import async_register_card
+    from .services import async_register_services
+
+    async_register_services(hass)
+    await async_register_card(hass)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    await _async_register_frontend(hass)
+    return True
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    await _async_register_frontend(hass)
     client = AquaIlluminationClient(async_get_clientsession(hass), entry.data[CONF_HOST])
     try:
         identity = await client.identity()
@@ -46,11 +66,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    from .panel import async_register_card
-    from .services import async_register_services
-
-    async_register_services(hass)
-    await async_register_card(hass)
     return True
 
 

@@ -11,7 +11,7 @@
  *   always_unlocked: true     # no lock, controls always live
  *   lock_seconds: 120         # idle time before it relocks
  */
-const CARD_VERSION = "0.8.1";
+const CARD_VERSION = "0.8.2";
 const LOCK_AFTER_SECONDS = 120;  // idle time before the card locks itself again
 const BUILTIN_PRESETS = ["Standard day", "Coral growth", "Acclimation (gentle)"];
 
@@ -107,7 +107,7 @@ class AquaIlluminationCard extends HTMLElement {
     const conn = this._e("binary_sensor", "connection");
     const ca = (conn && conn.attributes) || {};
     const offline = conn
-      ? conn.state === "off"
+      ? ["off", "unavailable"].includes(conn.state)
       : [sched.state, (this._e("switch", "schedule") || {}).state].includes("unavailable");
     // Entities blank out while offline - keep the last good schedule for the chart.
     if ((sched.attributes.ramps || []).length) this._lastRamps = sched.attributes.ramps;
